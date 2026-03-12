@@ -1,5 +1,3 @@
-"""Tests for ComparatorResult dataclass."""
-
 import pytest
 
 from struct_extract_eval.core.comparators.comparator_result import ComparatorResult
