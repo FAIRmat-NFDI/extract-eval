@@ -1,5 +1,3 @@
-"""Comparator result dataclass and interface."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field

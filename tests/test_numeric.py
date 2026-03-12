@@ -1,5 +1,3 @@
-"""Tests for numeric comparator."""
-
 import math
 
 from struct_extract_eval.core.comparators.numeric import compare_numeric
