@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from struct_extract_eval.core.comparators.comparator_result import ComparatorResult
+from struct_extract_eval.core.comparators.comparator import ComparatorResult
 
 
 def compare_numeric(gold: Any, extracted: Any, params: dict[str, Any]) -> ComparatorResult:
