@@ -1,6 +1,8 @@
+from typing import Any
+
 import pytest
 
-from struct_extract_eval.core.comparators.comparator_result import ComparatorResult
+from struct_extract_eval.core.comparators.comparator import ComparatorResult
 from struct_extract_eval.core.comparators.registry import (
     ComparatorNotFoundError,
     _clear_registry,
@@ -27,7 +29,7 @@ def test_get_unknown_raises() -> None:
 
 
 def test_register_custom() -> None:
-    def my_comparator(gold: object, extracted: object, params: dict) -> ComparatorResult:
+    def my_comparator(gold: object, extracted: object, params: dict[str, Any]) -> ComparatorResult:
         return ComparatorResult(score=1.0, comparator="custom")
 
     register("custom", my_comparator)
@@ -35,7 +37,7 @@ def test_register_custom() -> None:
 
 
 def test_duplicate_registration_raises() -> None:
-    def dummy(gold: object, extracted: object, params: dict) -> ComparatorResult:  # type: ignore[type-arg]
+    def dummy(gold: object, extracted: object, params: dict[str, Any]) -> ComparatorResult:
         return ComparatorResult(score=1.0, comparator="dummy")
 
     register("dummy", dummy)
