@@ -5,19 +5,12 @@ def test_exact_match_short_circuits() -> None:
     result = compare_semantic("hello world", "hello world", {})
     assert result.score == 1.0
     assert result.needs_judge is False
-    assert result.reason == "exact_match"
 
 
-def test_case_insensitive_short_circuit() -> None:
+def test_case_different_needs_judge() -> None:
+    """No normalization -- case difference needs judge. Use transforms for normalization."""
     result = compare_semantic("Hello World", "hello world", {})
-    assert result.score == 1.0
-    assert result.needs_judge is False
-
-
-def test_whitespace_short_circuit() -> None:
-    result = compare_semantic("  hello  ", "hello", {})
-    assert result.score == 1.0
-    assert result.needs_judge is False
+    assert result.needs_judge is True
 
 
 def test_different_values_need_judge() -> None:

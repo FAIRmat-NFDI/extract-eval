@@ -47,7 +47,7 @@ def test_duplicate_registration_raises() -> None:
 
 def test_builtin_exact() -> None:
     fn = get_comparator("exact")
-    result = fn("hello", "HELLO", {})
+    result = fn("hello", "hello", {})
     assert result.score == 1.0
 
 
