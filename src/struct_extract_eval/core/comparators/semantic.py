@@ -11,9 +11,8 @@ def compare_semantic(gold: Any, extracted: Any, params: dict[str, Any]) -> Compa
     The judge call is not made here -- needs_judge=True signals that the
     pipeline layer should batch this pair into a judge call.
     """
-    if gold == extracted:
+    if type(gold) is type(extracted) and gold == extracted:
         return ComparatorResult(score=1.0, comparator="semantic")
-
 
     # todo!! llm judge
 

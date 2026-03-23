@@ -8,13 +8,13 @@ def test_identical_strings() -> None:
 
 
 def test_case_sensitive() -> None:
-    """exact does raw equality -- case matters. Use transforms for normalization."""
+    """Case matters -- normalize upstream before comparing."""
     result = compare_exact("XRD", "xrd", {})
     assert result.score == 0.0
 
 
 def test_whitespace_matters() -> None:
-    """exact does raw equality -- whitespace matters. Use transforms for normalization."""
+    """Whitespace matters -- normalize upstream before comparing."""
     result = compare_exact("  XRD ", "XRD", {})
     assert result.score == 0.0
 
@@ -31,9 +31,11 @@ def test_booleans() -> None:
 
 
 def test_different_types_mismatch() -> None:
-    """exact does raw equality -- no type coercion."""
+    """No type coercion -- different types never match."""
     assert compare_exact(True, "true", {}).score == 0.0
     assert compare_exact(123, "123", {}).score == 0.0
+    assert compare_exact(True, 1, {}).score == 0.0
+    assert compare_exact(False, 0, {}).score == 0.0
 
 
 def test_empty_strings() -> None:

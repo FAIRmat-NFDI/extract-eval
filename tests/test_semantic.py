@@ -8,8 +8,8 @@ def test_exact_match_short_circuits() -> None:
 
 
 def test_case_different_needs_judge() -> None:
-    """No normalization -- case difference needs judge. Use transforms for normalization."""
     result = compare_semantic("Hello World", "hello world", {})
+    assert result.score == 0.0
     assert result.needs_judge is True
 
 
