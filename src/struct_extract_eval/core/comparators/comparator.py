@@ -23,6 +23,4 @@ class ComparatorResult:
 class Comparator(Protocol):
     """Interface for comparator functions."""
 
-    def __call__(
-        self, gold: Any, extracted: Any, params: dict[str, Any]
-    ) -> ComparatorResult: ...
+    def __call__(self, gold: Any, extracted: Any, params: dict[str, Any]) -> ComparatorResult: ...

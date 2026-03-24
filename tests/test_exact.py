@@ -7,14 +7,16 @@ def test_identical_strings() -> None:
     assert result.comparator == "exact"
 
 
-def test_case_insensitive() -> None:
+def test_case_sensitive() -> None:
+    """Case matters -- normalize upstream before comparing."""
     result = compare_exact("XRD", "xrd", {})
-    assert result.score == 1.0
+    assert result.score == 0.0
 
 
-def test_strips_whitespace() -> None:
+def test_whitespace_matters() -> None:
+    """Whitespace matters -- normalize upstream before comparing."""
     result = compare_exact("  XRD ", "XRD", {})
-    assert result.score == 1.0
+    assert result.score == 0.0
 
 
 def test_mismatch() -> None:
@@ -28,18 +30,17 @@ def test_booleans() -> None:
     assert compare_exact(False, False, {}).score == 1.0
 
 
-def test_boolean_vs_string() -> None:
-    assert compare_exact(True, "true", {}).score == 1.0
-    assert compare_exact(False, "false", {}).score == 1.0
+def test_different_types_mismatch() -> None:
+    """No type coercion -- different types never match."""
+    assert compare_exact(True, "true", {}).score == 0.0
+    assert compare_exact(123, "123", {}).score == 0.0
+    assert compare_exact(True, 1, {}).score == 0.0
+    assert compare_exact(False, 0, {}).score == 0.0
 
 
 def test_empty_strings() -> None:
     assert compare_exact("", "", {}).score == 1.0
     assert compare_exact("", "something", {}).score == 0.0
-
-
-def test_numbers_as_strings() -> None:
-    assert compare_exact(123, "123", {}).score == 1.0
 
 
 def test_none_values() -> None:
