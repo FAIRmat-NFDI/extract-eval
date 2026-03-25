@@ -18,7 +18,7 @@ def _clean_registry() -> None:
 
 
 def test_builtins_registered() -> None:
-    for name in ("exact", "numeric", "semantic", "skip"):
+    for name in ("exact", "numeric", "oneof", "semantic", "skip"):
         fn = get_comparator(name)
         assert callable(fn)
 
@@ -54,4 +54,10 @@ def test_builtin_exact() -> None:
 def test_builtin_numeric() -> None:
     fn = get_comparator("numeric")
     result = fn(42.0, 42.0, {})
+    assert result.score == 1.0
+
+
+def test_builtin_oneof() -> None:
+    fn = get_comparator("oneof")
+    result = fn("PVD", "PVD", {"values": ["PVD", "Sputtering"]})
     assert result.score == 1.0
