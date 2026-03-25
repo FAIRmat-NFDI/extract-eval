@@ -4,9 +4,9 @@ from struct_extract_eval.core.comparators.comparator import ComparatorResult
 
 
 def compare_oneof(gold: Any, extracted: Any, params: dict[str, Any]) -> ComparatorResult:
-    """Score 1 if extracted matches any value in params["values"], 0 otherwise."""
+    """Compare extracted value against a list of acceptable values"""
     values = params.get("values")
-    if not isinstance(values, (list, tuple)):
+    if not isinstance(values, list):
         raise TypeError(
             f"oneof comparator requires 'values' to be a list, got {type(values).__name__}"
         )

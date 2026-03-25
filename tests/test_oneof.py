@@ -20,6 +20,16 @@ def test_empty_values() -> None:
     assert result.score == 0.0
 
 
+def test_empty_string() -> None:
+    result = compare_oneof("PVD", "", {"values": []})
+    assert result.score == 0.0
+
+
+def test_empty_string_pass() -> None:
+    result = compare_oneof("PVD", "", {"values": [""]})
+    assert result.score == 1.0
+
+
 def test_missing_values_key() -> None:
     with pytest.raises(TypeError, match="requires 'values' to be a list"):
         compare_oneof("PVD", "PVD", {})
