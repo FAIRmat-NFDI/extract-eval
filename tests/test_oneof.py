@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 
 from struct_extract_eval.core.comparators.oneof import compare_oneof
