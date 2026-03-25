@@ -3,6 +3,7 @@ from __future__ import annotations
 from struct_extract_eval.core.comparators.comparator import Comparator
 from struct_extract_eval.core.comparators.exact import compare_exact
 from struct_extract_eval.core.comparators.numeric import compare_numeric
+from struct_extract_eval.core.comparators.oneof import compare_oneof
 from struct_extract_eval.core.comparators.semantic import compare_semantic
 from struct_extract_eval.core.comparators.skip import compare_skip
 
@@ -14,6 +15,7 @@ class ComparatorNotFoundError(KeyError):
 _BUILTIN_COMPARATORS: dict[str, Comparator] = {
     "exact": compare_exact,
     "numeric": compare_numeric,
+    "oneof": compare_oneof,
     "semantic": compare_semantic,
     "skip": compare_skip,
 }
