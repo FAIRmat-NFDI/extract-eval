@@ -1,8 +1,8 @@
 """x-eval-* utilities.
 
 ``add_default_xeval`` annotates a resolved schema in-place with sensible
-``x-eval-*`` defaults so that downstream code (``parse_schema``) always
-has explicit config on every leaf field.
+``x-eval-*`` defaults so that downstream consumers always
+have explicit config on every leaf field.
 
 ``parse_xeval_entry`` is the shared parser for the two-shape rule used
 by both ``x-eval-transform`` and ``x-eval-compare``.
