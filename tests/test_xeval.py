@@ -1,5 +1,3 @@
-import copy
-
 import pytest
 
 from struct_extract_eval.xeval import add_default_xeval, parse_xeval_entry
