@@ -18,7 +18,7 @@ def infer_schema(instances: list[object]) -> dict[str, object]:
     if not present_instances:
         return {"type": "string", "x-eval-compare": "skip"}
 
-    first = present_instances[0] # first instance used to decide the instance type
+    first = present_instances[0]  # first instance used to decide the instance type
     if isinstance(first, bool):
         return {"type": "boolean"}
     if isinstance(first, int):
