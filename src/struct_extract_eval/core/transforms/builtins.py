@@ -16,7 +16,7 @@ def transform_strip(value: Any, params: dict[str, Any]) -> Any:
 
 
 def transform_normalize_whitespace(value: Any, params: dict[str, Any]) -> Any:
-    """Collapse multiple spaces/newlines to a single space,strip leading/trailing whitespace."""
+    """Collapse multiple spaces/newlines to a single space, strip leading/trailing whitespace."""
     if not isinstance(value, str):
         raise TypeError(
             f"normalize_whitespace transform requires a string, got {type(value).__name__}"
