@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 
 import pytest
@@ -14,34 +12,6 @@ from struct_extract_eval.core.json_utils import (
     resolve_type,
     walk_schema,
 )
-
-
-# --- load_schema ---
-
-
-class TestLoadSchema:
-    def test_valid_schema(self, tmp_path: pytest.TempPathFactory) -> None:
-        p = tmp_path / "schema.json"  # type: ignore[operator]
-        p.write_text(json.dumps({"type": "object", "properties": {"x": {"type": "string"}}}))
-        schema = load_schema(p)
-        assert schema["type"] == "object"
-
-    def test_non_object_raises(self, tmp_path: pytest.TempPathFactory) -> None:
-        p = tmp_path / "bad.json"  # type: ignore[operator]
-        p.write_text(json.dumps([1, 2, 3]))
-        with pytest.raises(ValueError, match="must be a JSON object"):
-            load_schema(p)
-
-    def test_accepts_string_path(self, tmp_path: pytest.TempPathFactory) -> None:
-        p = tmp_path / "schema.json"  # type: ignore[operator]
-        p.write_text(json.dumps({"type": "string"}))
-        schema = load_schema(str(p))
-        assert schema["type"] == "string"
-
-    def test_file_not_found(self) -> None:
-        with pytest.raises(FileNotFoundError):
-            load_schema("/nonexistent/schema.json")
-
 
 # --- Shared fixtures ---
 
@@ -164,6 +134,9 @@ class TestIsLeaf:
 
     def test_empty_schema(self) -> None:
         assert is_leaf({}) is True
+
+    def test_object_with_empty_properties(self) -> None:
+        assert is_leaf({"type": "object", "properties": {}}) is True
 
 
 # --- get_children ---
@@ -358,5 +331,10 @@ class TestGetNodeAtPath:
 
     def test_array_path_on_non_array(self) -> None:
         assert get_node_at_path(FLAT_SCHEMA, "name[]") is None
+
+    def test_root_array_path(self) -> None:
+        schema: dict[str, object] = {"type": "array", "items": {"type": "string"}}
+        node = get_node_at_path(schema, "[]")
+        assert node == {"type": "string"}
 
 

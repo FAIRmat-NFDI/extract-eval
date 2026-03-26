@@ -3,7 +3,8 @@ JSON Schema traversal utilities.
 
 Assumes the schema is already resolved -- no $ref, allOf, anyOf, oneOf,
 if/then/else, or other composition keywords. Only type, properties, items,
-required, and x-eval-* keys are expected. Call resolve_schema() first.
+required, and x-eval-* keys are expected. Schemas should be pre-resolved
+before using these utilities.
 
 No x-eval-* knowledge -- these functions operate on structure only.
 """
@@ -34,15 +35,12 @@ def resolve_type(schema: dict[str, object]) -> str | None:
 
 
 def is_leaf(schema: dict[str, object]) -> bool:
-    """True if the resolved schema node has no children to recurse into.
-    A node without ``properties`` or ``items`` -- no further structure
-    to descend into.
+    """True if the schema node has no children to recurse into.
+
+    Defined in terms of :func:`get_children`: a node is a leaf
+    exactly when ``get_children(schema)`` returns an empty list.
     """
-    if "properties" in schema and isinstance(schema["properties"], dict):
-        return False
-    if "items" in schema and isinstance(schema["items"], dict):
-        return False
-    return True
+    return not get_children(schema)
 
 
 def get_children(
@@ -114,7 +112,7 @@ def get_node_at_path(
     """
     if not path:
         return schema
-    parts = path.replace("[]", ".[]").split(".")
+    parts = [p for p in path.replace("[]", ".[]").split(".") if p]
     node: dict[str, object] | None = schema
     for part in parts:
         if node is None:
