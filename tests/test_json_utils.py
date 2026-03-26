@@ -1,13 +1,46 @@
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from struct_extract_eval.core.json_utils import (
     get_children,
     get_leaf_paths,
+    get_node_at_path,
     is_leaf,
     iter_schema,
+    load_schema,
     resolve_type,
     walk_schema,
 )
+
+
+# --- load_schema ---
+
+
+class TestLoadSchema:
+    def test_valid_schema(self, tmp_path: pytest.TempPathFactory) -> None:
+        p = tmp_path / "schema.json"  # type: ignore[operator]
+        p.write_text(json.dumps({"type": "object", "properties": {"x": {"type": "string"}}}))
+        schema = load_schema(p)
+        assert schema["type"] == "object"
+
+    def test_non_object_raises(self, tmp_path: pytest.TempPathFactory) -> None:
+        p = tmp_path / "bad.json"  # type: ignore[operator]
+        p.write_text(json.dumps([1, 2, 3]))
+        with pytest.raises(ValueError, match="must be a JSON object"):
+            load_schema(p)
+
+    def test_accepts_string_path(self, tmp_path: pytest.TempPathFactory) -> None:
+        p = tmp_path / "schema.json"  # type: ignore[operator]
+        p.write_text(json.dumps({"type": "string"}))
+        schema = load_schema(str(p))
+        assert schema["type"] == "string"
+
+    def test_file_not_found(self) -> None:
+        with pytest.raises(FileNotFoundError):
+            load_schema("/nonexistent/schema.json")
 
 
 # --- Shared fixtures ---
@@ -139,27 +172,35 @@ class TestIsLeaf:
 class TestGetChildren:
     def test_flat_object(self) -> None:
         children = get_children(FLAT_SCHEMA)
-        paths = [path for _, path in children]
-        assert set(paths) == {"name", "age", "active"}
+        names = [name for name, _, _ in children]
+        assert set(names) == {"name", "age", "active"}
 
     def test_child_paths_flat(self) -> None:
         children = get_children(FLAT_SCHEMA)
-        paths = [path for _, path in children]
+        paths = [path for _, _, path in children]
         assert "name" in paths
         assert "age" in paths
+
+    def test_field_names(self) -> None:
+        children = get_children(FLAT_SCHEMA)
+        name_to_path = {name: path for name, _, path in children}
+        assert name_to_path["name"] == "name"
+        assert name_to_path["age"] == "age"
+        assert name_to_path["active"] == "active"
 
     def test_child_paths_with_parent(self) -> None:
         inner = NESTED_SCHEMA["properties"]["experiment"]  # type: ignore[index]
         children = get_children(inner, path="experiment")
-        paths = [path for _, path in children]
-        assert "experiment.name" in paths
-        assert "experiment.temp" in paths
+        name_to_path = {name: path for name, _, path in children}
+        assert name_to_path["name"] == "experiment.name"
+        assert name_to_path["temp"] == "experiment.temp"
 
     def test_array_items(self) -> None:
         tags = ARRAY_OF_PRIMITIVES["properties"]["tags"]  # type: ignore[index]
         children = get_children(tags, path="tags")
         assert len(children) == 1
-        schema, path = children[0]
+        name, schema, path = children[0]
+        assert name == "[]"
         assert path == "tags[]"
         assert schema == {"type": "string"}
 
@@ -168,7 +209,7 @@ class TestGetChildren:
 
     def test_empty_path(self) -> None:
         children = get_children(FLAT_SCHEMA, path="")
-        paths = [path for _, path in children]
+        paths = [path for _, _, path in children]
         assert "name" in paths  # no leading dot
 
 
@@ -280,3 +321,42 @@ class TestGetLeafPaths:
     def test_bare_leaf(self) -> None:
         leaves = get_leaf_paths({"type": "string"})
         assert leaves == [""]
+
+
+# --- get_node_at_path ---
+
+
+class TestGetNodeAtPath:
+    def test_empty_path_returns_root(self) -> None:
+        assert get_node_at_path(FLAT_SCHEMA, "") is FLAT_SCHEMA
+
+    def test_flat_property(self) -> None:
+        node = get_node_at_path(FLAT_SCHEMA, "name")
+        assert node == {"type": "string"}
+
+    def test_nested_property(self) -> None:
+        node = get_node_at_path(NESTED_SCHEMA, "experiment.name")
+        assert node == {"type": "string"}
+
+    def test_array_items(self) -> None:
+        node = get_node_at_path(ARRAY_OF_PRIMITIVES, "tags[]")
+        assert node == {"type": "string"}
+
+    def test_array_of_objects_field(self) -> None:
+        node = get_node_at_path(ARRAY_OF_OBJECTS, "samples[].id")
+        assert node == {"type": "string"}
+
+    def test_deeply_nested_leaf(self) -> None:
+        node = get_node_at_path(DEEPLY_NESTED, "experiment.samples[].measurements[].value")
+        assert node == {"type": "number"}
+
+    def test_nonexistent_path(self) -> None:
+        assert get_node_at_path(FLAT_SCHEMA, "nonexistent") is None
+
+    def test_partial_nonexistent_path(self) -> None:
+        assert get_node_at_path(NESTED_SCHEMA, "experiment.bogus") is None
+
+    def test_array_path_on_non_array(self) -> None:
+        assert get_node_at_path(FLAT_SCHEMA, "name[]") is None
+
+
