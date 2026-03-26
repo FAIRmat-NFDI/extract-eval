@@ -16,6 +16,9 @@ def test_no_match() -> None:
 
 
 def test_empty_values() -> None:
+    result = compare_oneof("PVD", "PVD", {"values": []})
+    assert result.score == 0.0
+
 
 def test_extracted_in_values_gold_not_in_values() -> None:
     result = compare_oneof("PVD", "CVD", {"values": ["PVD", "Sputtering"]})
