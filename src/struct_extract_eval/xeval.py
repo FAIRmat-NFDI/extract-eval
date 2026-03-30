@@ -64,7 +64,9 @@ def add_default_xeval(schema: dict[str, object]) -> dict[str, object]:
     ``x-eval-compare``, infers the comparator from the node's type.
     For each property of an object, infers ``x-eval-required`` from
     the parent's ``required`` array (explicit ``x-eval-required`` is
-    never overridden).
+    never overridden). The ``required`` array is then removed -- the
+    eval schema uses only ``x-eval-required`` (annotated only when
+    ``false``; ``true`` is the default).
 
     Returns the schema for convenience (same object, mutated in-place).
     """
@@ -92,3 +94,6 @@ def _annotate_node(schema: dict[str, object]) -> None:
                 child_schema["x-eval-required"] = False
 
         _annotate_node(child_schema)
+
+    # Remove the JSON Schema required array -- eval schema uses only x-eval-required.
+    schema.pop("required", None)

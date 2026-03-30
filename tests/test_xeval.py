@@ -125,6 +125,8 @@ class TestAddDefaultXeval:
         assert "x-eval-required" not in schema["properties"]["name"]  # type: ignore[index]
         # Non-required fields get x-eval-required: false
         assert schema["properties"]["optional_field"]["x-eval-required"] is False  # type: ignore[index]
+        # required array is removed from eval schema
+        assert "required" not in schema
 
     def test_explicit_required_not_overridden(self) -> None:
         schema: dict[str, object] = {
@@ -137,6 +139,8 @@ class TestAddDefaultXeval:
         add_default_xeval(schema)
         # Explicit x-eval-required takes precedence over parent required array
         assert schema["properties"]["name"]["x-eval-required"] is False  # type: ignore[index]
+        # required array is removed from eval schema
+        assert "required" not in schema
 
     def test_no_required_array_defaults_all_true(self) -> None:
         """When parent has no 'required' array, no x-eval-required is set (default true)."""
@@ -170,6 +174,8 @@ class TestAddDefaultXeval:
         assert sample["properties"]["name"]["x-eval-compare"] == "exact"
         assert "x-eval-required" not in sample["properties"]["name"]
         assert sample["properties"]["label"]["x-eval-required"] is False
+        # required array is removed at all levels
+        assert "required" not in sample
 
     def test_array_items(self) -> None:
         schema: dict[str, object] = {
@@ -204,12 +210,15 @@ class TestAddDefaultXeval:
             },
         }
         add_default_xeval(schema)
-        item_props = schema["properties"]["steps"]["items"]["properties"]  # type: ignore[index]
+        items = schema["properties"]["steps"]["items"]  # type: ignore[index]
+        item_props = items["properties"]
         assert item_props["name"]["x-eval-compare"] == "exact"
         assert "x-eval-required" not in item_props["name"]
         assert item_props["duration"]["x-eval-compare"] == "numeric"
         assert item_props["duration"]["x-eval-required"] is False
         assert item_props["comment"]["x-eval-required"] is False
+        # required array is removed from items schema
+        assert "required" not in items
 
     def test_deeply_nested(self) -> None:
         schema: dict[str, object] = {
