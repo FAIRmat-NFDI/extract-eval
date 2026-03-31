@@ -11,8 +11,6 @@ by both ``x-eval-transform`` and ``x-eval-compare``.
 
 from struct_extract_eval.core.json_utils import get_children, is_leaf, resolve_type
 
-_SEMANTIC_LENGTH_THRESHOLD = 64  # strings longer than this default to semantic compare
-
 
 def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, object]]:
     """Parse the two-shape config rule into ``(name, params)``.
@@ -54,9 +52,6 @@ def _default_comparator(schema: dict[str, object]) -> str:
     if json_type == "boolean":
         return "exact"
     if json_type == "string":
-        max_length = schema.get("maxLength")
-        if isinstance(max_length, int) and max_length > _SEMANTIC_LENGTH_THRESHOLD:
-            return "semantic"
         return "exact"
     if json_type == "object":
         return "skip"

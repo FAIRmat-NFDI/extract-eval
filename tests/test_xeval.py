@@ -70,7 +70,8 @@ class TestAddDefaultXeval:
         add_default_xeval(schema)
         assert schema["properties"]["active"]["x-eval-compare"] == "exact"  # type: ignore[index]
 
-    def test_long_string_gets_semantic(self) -> None:
+    def test_long_string_gets_exact(self) -> None:
+        """All strings default to exact, regardless of maxLength."""
         schema: dict[str, object] = {
             "type": "object",
             "properties": {
@@ -78,18 +79,7 @@ class TestAddDefaultXeval:
             },
         }
         add_default_xeval(schema)
-        assert schema["properties"]["description"]["x-eval-compare"] == "semantic"  # type: ignore[index]
-
-    def test_string_at_boundary_gets_exact(self) -> None:
-        """maxLength exactly 64 is not > 64, so gets exact."""
-        schema: dict[str, object] = {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "maxLength": 64},
-            },
-        }
-        add_default_xeval(schema)
-        assert schema["properties"]["title"]["x-eval-compare"] == "exact"  # type: ignore[index]
+        assert schema["properties"]["description"]["x-eval-compare"] == "exact"  # type: ignore[index]
 
     def test_object_no_properties_gets_skip(self) -> None:
         schema: dict[str, object] = {
