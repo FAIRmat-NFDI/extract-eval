@@ -1,10 +1,9 @@
 """SchemaNode tree and parse_schema.
 
 Parses an eval schema (resolved schema + x-eval-* extensions) into a
-SchemaNode tree. All downstream scoring code works with SchemaNode,
-never raw dicts.
+SchemaNode tree. All downstream scoring code works with SchemaNode.
 
-Expects add_default_xeval() to have been called first -- parse_schema
+Call add_default_xeval() to get eval schema -- parse_schema
 does not assign defaults, it validates and parses.
 """
 
@@ -47,14 +46,13 @@ class SchemaError(Exception):
 class SchemaNode:
     """A single node in the parsed evaluation schema tree."""
 
-    path: str
+    path: str # field path
     json_type: str
     comparator: str
     children: list["SchemaNode"] = field(default_factory=list)
     required: bool = True
     transform: list[str | dict[str, object]] | None = None
     comparator_params: dict[str, object] = field(default_factory=dict)
-    align: dict[str, object] | None = None
 
 
 def _validate_xeval(schema: dict[str, object], path: str) -> None:
@@ -75,8 +73,7 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
                 raise SchemaError(
                     "x-eval-compare object must have exactly one key", path
                 )
-            comparator_name = next(iter(raw_compare))
-            params = raw_compare[comparator_name]
+            comparator_name, params = next(iter(raw_compare.items()))
             if not isinstance(params, dict):
                 raise SchemaError(
                     f"params for '{comparator_name}' must be a dict, "
@@ -102,17 +99,12 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
                     f"x-eval-transform[{i}] must be a string or object",
                     path,
                 )
-            if isinstance(item, str):
-                transform_name = item
-            else:
-                transform_name = next(iter(item))
-                transform_params = item[transform_name]
-                if not isinstance(transform_params, dict):
-                    raise SchemaError(
-                        f"params for transform '{transform_name}' must be a dict, "
-                        f"got {type(transform_params).__name__}",
-                        path,
-                    )
+            try:
+                transform_name, _ = parse_xeval_entry(item)
+            except (SchemaError, StopIteration, ValueError) as err:
+                raise SchemaError(
+                    f"x-eval-transform[{i}]: {err}", path
+                ) from err
             try:
                 get_transform(transform_name)
             except TransformNotFoundError as err:
@@ -156,16 +148,12 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
     raw_transform = schema.get("x-eval-transform")
     transform = list(raw_transform) if isinstance(raw_transform, list) else None
 
-    raw_align = schema.get("x-eval-align")
-    align = dict(raw_align) if isinstance(raw_align, dict) else None
-
     node = SchemaNode(
         path=path,
         json_type=json_type,
         comparator=comparator,
         children=children,
         transform=transform,
-        align=align,
     )
     if comparator_params:
         node.comparator_params = comparator_params

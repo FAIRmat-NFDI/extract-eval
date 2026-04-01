@@ -36,7 +36,6 @@ class TestSchemaNode:
         assert node.transform is None
         assert node.required is True
         assert node.comparator_params == {}
-        assert node.align is None
 
 
 # --- _default_comparator ---
@@ -81,9 +80,20 @@ class TestValidateXeval:
         )
 
     def test_transform_scalar_params_raises(self) -> None:
-        with pytest.raises(SchemaError, match="params for transform 'round_digits' must be a dict"):
+        with pytest.raises(SchemaError, match="must be a dict"):
             _validate_xeval(
                 {"x-eval-transform": [{"round_digits": 2}]},
+                "test",
+            )
+
+    def test_transform_empty_dict_raises(self) -> None:
+        with pytest.raises(SchemaError, match="x-eval-transform"):
+            _validate_xeval({"x-eval-transform": [{}]}, "test")
+
+    def test_transform_multi_key_dict_raises(self) -> None:
+        with pytest.raises(SchemaError, match="x-eval-transform"):
+            _validate_xeval(
+                {"x-eval-transform": [{"lowercase": {}, "strip": {}}]},
                 "test",
             )
 
@@ -95,18 +105,6 @@ class TestValidateXeval:
         with pytest.raises(SchemaError, match="Unknown transform"):
             _validate_xeval({"x-eval-transform": [{"bogus": {"x": 1}}]}, "test")
 
-
-    # @pytest.mark.skip(reason="x-eval-align validation commented out, TODO")
-    # def test_align_key_field_without_key(self) -> None:
-    #     with pytest.raises(SchemaError, match="requires 'key'"):
-    #         _validate_xeval({"x-eval-align": {"match_by": "key_field"}}, "test")
-    #
-    # @pytest.mark.skip(reason="x-eval-align validation commented out, TODO")
-    # def test_align_key_field_with_key(self) -> None:
-    #     _validate_xeval(
-    #         {"x-eval-align": {"match_by": "key_field", "key": "name"}},
-    #         "test",
-    #     )
 
     def test_old_oneof_key_warns(self, caplog: pytest.LogCaptureFixture) -> None:
         """x-eval-oneof is no longer a known key -- should warn."""
