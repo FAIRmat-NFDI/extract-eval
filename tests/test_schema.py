@@ -41,7 +41,6 @@ class TestSchemaNode:
 # --- _default_comparator ---
 
 
-
 # --- _validate_xeval ---
 
 
@@ -108,7 +107,6 @@ class TestValidateXeval:
         with pytest.raises(SchemaError, match="Unknown transform"):
             _validate_xeval({"x-eval-transform": [{"bogus": {"x": 1}}]}, "test")
 
-
     def test_old_oneof_key_warns(self, caplog: pytest.LogCaptureFixture) -> None:
         """x-eval-oneof is no longer a known key -- should warn."""
         with caplog.at_level(logging.WARNING):
@@ -127,9 +125,7 @@ class TestValidateXeval:
 
     def test_compare_object_multiple_keys(self) -> None:
         with pytest.raises(SchemaError, match="exactly one key"):
-            _validate_xeval(
-                {"x-eval-compare": {"exact": {}, "numeric": {}}}, "test"
-            )
+            _validate_xeval({"x-eval-compare": {"exact": {}, "numeric": {}}}, "test")
 
     def test_compare_scalar_params_raises(self) -> None:
         schema: dict[str, object] = {
@@ -344,7 +340,12 @@ class TestParseSchema:
 
     def test_missing_type_raises(self) -> None:
         with pytest.raises(SchemaError, match="Missing or invalid 'type'"):
-            parse_schema({"x-eval-compare": "exact", "properties": {"x": {"type": "string", "x-eval-compare": "exact"}}})
+            parse_schema(
+                {
+                    "x-eval-compare": "exact",
+                    "properties": {"x": {"type": "string", "x-eval-compare": "exact"}},
+                }
+            )
 
     def test_invalid_comparator_raises(self) -> None:
         schema: dict[str, object] = {
@@ -392,7 +393,10 @@ class TestParseSchema:
                                     "type": "object",
                                     "x-eval-compare": "exact",
                                     "properties": {
-                                        "duration": {"type": "number", "x-eval-compare": "numeric"},
+                                        "duration": {
+                                            "type": "number",
+                                            "x-eval-compare": "numeric",
+                                        },
                                     },
                                 },
                             },
@@ -409,7 +413,6 @@ class TestParseSchema:
         duration = step_item.children[0]
         assert duration.path == "layers[].steps[].duration"
         assert duration.comparator == "numeric"
-
 
 
 # --- Test helpers ---
