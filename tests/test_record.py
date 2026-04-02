@@ -1,8 +1,6 @@
 from struct_extract_eval.core.scoring import FieldResult
 from struct_extract_eval.pipeline.record import (
-    FieldAggregation,
     RecordResult,
-    RunResult,
     build_record_result,
     build_run_result,
 )

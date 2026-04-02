@@ -56,9 +56,8 @@ def _default_comparator(schema: dict[str, object]) -> str:
     if json_type == "object":
         return "skip"
     # Fallback for unknown types
-    return "exact"
-
     # todo: add semantic ??
+    return "exact"
 
 
 def add_default_xeval(schema: dict[str, object]) -> dict[str, object]:

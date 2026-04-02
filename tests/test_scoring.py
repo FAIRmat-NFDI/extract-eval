@@ -1,4 +1,4 @@
-from struct_extract_eval.core.scoring import FieldResult, score_record
+from struct_extract_eval.core.scoring import score_record
 from struct_extract_eval.core.schema import parse_schema
 from struct_extract_eval.xeval import add_default_xeval
 
@@ -255,7 +255,6 @@ class TestOrderedArray:
         gold = {"steps": [{"name": "deposit", "temp": 300}, {"name": "anneal", "temp": 500}]}
         extracted = {"steps": [{"name": "deposit", "temp": 300}, {"name": "anneal", "temp": 501}]}
         results = score_record(schema, gold, extracted)
-        by_path_status = [(r.path, r.status) for r in results]
         # First element: both fields match
         # Second element: name matches, temp mismatches
         assert len(results) == 4

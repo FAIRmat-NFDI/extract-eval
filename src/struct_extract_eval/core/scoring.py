@@ -4,12 +4,18 @@ Supports flat objects, nested objects, and ordered arrays.
 Unordered array alignment (Hungarian/key-field) is not yet implemented.
 """
 
+import logging
 from dataclasses import dataclass
+from typing import Literal
 
 from struct_extract_eval.core.comparators.registry import get_comparator
 from struct_extract_eval.core.schema import SchemaNode
 from struct_extract_eval.core.transforms.registry import get_transform
 from struct_extract_eval.xeval import parse_xeval_entry
+
+logger = logging.getLogger(__name__)
+
+FieldStatus = Literal["match", "mismatch", "omission", "hallucination", "skipped"]
 
 
 @dataclass
@@ -21,7 +27,7 @@ class FieldResult:
     comparator: str
     gold_value: object
     extracted_value: object
-    status: str  # "match", "mismatch", "omission", "hallucination", "skipped"
+    status: FieldStatus
 
 
 def score_record(
@@ -56,6 +62,10 @@ def _score_object(
 ) -> list[FieldResult]:
     """Score an object node by iterating its children."""
     results: list[FieldResult] = []
+    if not isinstance(gold_value, dict):
+        logger.warning("Expected dict at '%s', got %s in gold", node.path, type(gold_value).__name__)
+    if not isinstance(extracted_value, dict):
+        logger.warning("Expected dict at '%s', got %s in extracted", node.path, type(extracted_value).__name__)
     gold_dict = gold_value if isinstance(gold_value, dict) else {}
     extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
 
@@ -76,6 +86,7 @@ def _score_object(
                 results.extend(_omission_results(child))
             # If not required, skip -- no penalty
         # extracted_has and not gold_has: ignored by scoring
+        # todo: what if not gold_has but extracted_has? hallucination? currently ignored, but maybe should be scored?
 
     return results
 
@@ -87,6 +98,10 @@ def _score_array(
 ) -> list[FieldResult]:
     """Score an array node using ordered (positional) matching."""
     results: list[FieldResult] = []
+    if not isinstance(gold_value, list):
+        logger.warning("Expected list at '%s', got %s in gold", node.path, type(gold_value).__name__)
+    if not isinstance(extracted_value, list):
+        logger.warning("Expected list at '%s', got %s in extracted", node.path, type(extracted_value).__name__)
     gold_list = gold_value if isinstance(gold_value, list) else []
     extracted_list = extracted_value if isinstance(extracted_value, list) else []
     items_node = node.children[0]  # arrays have exactly one child: the items schema
@@ -119,7 +134,9 @@ def _score_leaf(
     comparator_fn = get_comparator(node.comparator)
     result = comparator_fn(gold_transformed, extracted_transformed, node.comparator_params)
 
-    if result.score >= 1.0:
+    if node.comparator == "skip":
+        status = "skipped"
+    elif result.score >= 1.0:
         status = "match"
     else:
         status = "mismatch"
@@ -149,7 +166,12 @@ def _apply_transforms(
 
 
 def _omission_results(node: SchemaNode) -> list[FieldResult]:
-    """Generate omission FieldResults for all leaves under a missing node."""
+    """Generate omission FieldResults for all leaves under a missing node.
+
+    Can be called on any node, not just leaves. For object nodes, recurses
+    into all children so every leaf in the subtree is marked as an omission.
+    For array nodes, returns empty -- a missing array has no elements to score.
+    """
     if node.json_type == "object" and node.children:
         results: list[FieldResult] = []
         for child in node.children:
@@ -169,7 +191,12 @@ def _omission_results(node: SchemaNode) -> list[FieldResult]:
 
 
 def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[FieldResult]:
-    """Generate hallucination FieldResults for extra extracted elements."""
+    """Generate hallucination FieldResults for extra extracted elements.
+
+    Can be called on any node, not just leaves. For object nodes, recurses
+    into all children so every leaf in the subtree is marked as a hallucination.
+    For array nodes, returns empty.
+    """
     if node.json_type == "object" and node.children:
         results: list[FieldResult] = []
         extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
