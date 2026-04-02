@@ -59,7 +59,7 @@ def build_record_result(
 
     Counting logic (skipped fields excluded from all counts):
     - match/mismatch: contributes to both precision and recall denominators
-    - omission (FF): contributes to recall denominator only
+    - omission (FN): contributes to recall denominator only
     - hallucination (FP): contributes to precision denominator only
     """
     precision_num = 0.0
