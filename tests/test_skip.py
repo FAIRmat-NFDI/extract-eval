@@ -1,5 +1,3 @@
-"""Tests for skip comparator."""
-
 from struct_extract_eval.core.comparators.skip import compare_skip
 
 
