@@ -51,7 +51,6 @@ class TestValidateXeval:
             "x-eval-required": False,
             "x-eval-compare": "exact",
             "x-eval-transform": ["lowercase", "strip"],
-            "x-eval-align": {"ordered": True},
         }
         _validate_xeval(schema, "test")  # should not raise
 
@@ -96,6 +95,10 @@ class TestValidateXeval:
                 {"x-eval-transform": [{"lowercase": {}, "strip": {}}]},
                 "test",
             )
+
+    def test_transform_non_string_key_raises(self) -> None:
+        with pytest.raises(SchemaError, match="x-eval-transform"):
+            _validate_xeval({"x-eval-transform": [{1: {}}]}, "test")
 
     def test_unknown_transform_name_raises(self) -> None:
         with pytest.raises(SchemaError, match="Unknown transform"):

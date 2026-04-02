@@ -4,7 +4,9 @@ Parses an eval schema (resolved schema + x-eval-* extensions) into a
 SchemaNode tree. All downstream scoring code works with SchemaNode.
 
 Call add_default_xeval() to get eval schema -- parse_schema
-does not assign defaults, it validates and parses.
+does not assign comparator defaults for leaf nodes, it validates
+and parses. Container nodes (objects/arrays) get a placeholder
+comparator since they are scored via their children, not directly.
 """
 
 import logging
@@ -28,7 +30,6 @@ _KNOWN_XEVAL_KEYS = frozenset(
         "x-eval-required",
         "x-eval-compare",
         "x-eval-transform",
-        "x-eval-align",
     }
 )
 
@@ -101,7 +102,7 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
                 )
             try:
                 transform_name, _ = parse_xeval_entry(item)
-            except (SchemaError, StopIteration, ValueError) as err:
+            except (SchemaError, StopIteration, ValueError, TypeError) as err:
                 raise SchemaError(
                     f"x-eval-transform[{i}]: {err}", path
                 ) from err
@@ -117,6 +118,8 @@ def _resolve_comparator(
     """Extract comparator name and params from x-eval-compare.
 
     Raises SchemaError if x-eval-compare is missing on a leaf node.
+    Non-leaf nodes without x-eval-compare get a placeholder ("exact", {})
+    since container nodes are scored via their children, not directly.
     """
     if "x-eval-compare" not in schema:
         if is_leaf(schema):
@@ -126,7 +129,10 @@ def _resolve_comparator(
         return "exact", {}
 
     raw = schema["x-eval-compare"]
-    name, params = parse_xeval_entry(raw)
+    try:
+        name, params = parse_xeval_entry(raw)
+    except (TypeError, ValueError) as exc:
+        raise SchemaError(f"invalid x-eval-compare: {exc}", path) from exc
     return name, params
 
 
