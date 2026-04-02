@@ -178,7 +178,9 @@ def _omission_results(node: SchemaNode) -> list[FieldResult]:
             results.extend(_omission_results(child))
         return results
     if node.json_type == "array" and node.children:
-        # Missing array: no elements to score
+        # Missing array: no elements to score. We don't know how many
+        # elements gold had, so we can't generate per-element omissions.
+        # todo: accept gold value so we can score omissions per element.
         return []
     return [FieldResult(
         path=node.path,
