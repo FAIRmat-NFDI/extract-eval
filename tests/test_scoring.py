@@ -151,7 +151,7 @@ class TestNestedObject:
         results = score_record(schema, gold, extracted)
         by_path = {r.path: r for r in results}
         assert by_path["experiment.name"].score == 1.0
-        # numeric comparator with default tolerance -- 300 vs 301
+        # numeric comparator uses exact equality here (no tolerance configured) -- 300 vs 301
         assert by_path["experiment.temp"].score == 0.0
 
     def test_missing_nested_object_omits_children(self) -> None:
