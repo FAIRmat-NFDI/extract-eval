@@ -13,7 +13,7 @@ from struct_extract_eval.core.json_utils import get_children, is_leaf, resolve_t
 
 
 def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, object]]:
-    """Parse the two-shape config rule into ``(name, params)``.
+    """Parse the two-shape config rule into ``(function name, function params)``.
 
     String form: ``"exact"`` -> ``("exact", {})``.
     Object form: ``{"numeric": {"tolerance": ...}}`` -> ``("numeric", {"tolerance": ...})``.
@@ -27,7 +27,7 @@ def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, ob
             raise ValueError(
                 f"Config object must have exactly one key, got {len(entry)}: {list(entry)}"
             )
-        name = next(iter(entry))
+        (name,) = entry
         if not isinstance(name, str):
             raise TypeError(
                 f"Config key must be a string, got {type(name).__name__}: {name!r}"
@@ -56,6 +56,7 @@ def _default_comparator(schema: dict[str, object]) -> str:
     if json_type == "object":
         return "skip"
     # Fallback for unknown types
+    # todo: add semantic ??
     return "exact"
 
 
