@@ -47,7 +47,7 @@ class SchemaError(Exception):
 class SchemaNode:
     """A single node in the parsed evaluation schema tree."""
 
-    path: str # field path
+    path: str  # field path
     json_type: str
     comparator: str
     children: list["SchemaNode"] = field(default_factory=list)
@@ -59,6 +59,11 @@ class SchemaNode:
 def _validate_xeval(schema: dict[str, object], path: str) -> None:
     """Validate x-eval-* keys at parse time. Raises SchemaError on invalid config."""
     for key in schema:
+        if not isinstance(key, str):
+            raise SchemaError(
+                f"Schema keys must be strings, got {type(key).__name__!r}",
+                path,
+            )
         if key.startswith("x-eval-") and key not in _KNOWN_XEVAL_KEYS:
             logger.warning("Unknown x-eval key '%s' at path '%s'", key, path)
 
@@ -118,7 +123,7 @@ def _resolve_comparator(
     """Extract comparator name and params from x-eval-compare.
 
     Raises SchemaError if x-eval-compare is missing on a leaf node.
-    Non-leaf nodes without x-eval-compare get a placeholder ("exact", {})
+    Non-leaf nodes without x-eval-compare get an empty placeholder
     since container nodes are scored via their children, not directly.
     """
     if "x-eval-compare" not in schema:
@@ -126,7 +131,7 @@ def _resolve_comparator(
             raise SchemaError(
                 "missing x-eval-compare -- run add_default_xeval first", path
             )
-        return "exact", {}
+        return "", {}
 
     raw = schema["x-eval-compare"]
     try:
