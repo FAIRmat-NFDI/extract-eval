@@ -89,93 +89,98 @@ EXTRACTED = [
 ]
 
 
-def section(title: str) -> None:
+def _section(title: str) -> None:
     print(f"\n{'=' * 60}")
     print(f"  {title}")
     print(f"{'=' * 60}\n")
 
 
-# ---------------------------------------------------------------------------
-# 2. Infer schema from gold instances
-# ---------------------------------------------------------------------------
+def main() -> None:
+    # ---------------------------------------------------------------------------
+    # 2. Infer schema from gold instances
+    # ---------------------------------------------------------------------------
 
-section("Step 1: Infer schema from gold instances")
-schema = infer_schema(GOLD)
-print(json.dumps(schema, indent=2))
-print("\nNote: lab_id is NOT in 'required' -- absent in record 2.")
+    _section("Step 1: Infer schema from gold instances")
+    schema = infer_schema(GOLD)
+    print(json.dumps(schema, indent=2))
+    print("\nNote: lab_id is NOT in 'required' -- absent in record 2.")
 
-# ---------------------------------------------------------------------------
-# 3. Annotate with eval defaults
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # 3. Annotate with eval defaults
+    # ---------------------------------------------------------------------------
 
-section("Step 2: Add default x-eval-* annotations")
-eval_schema = deepcopy(schema)
-add_default_xeval(eval_schema)
-print(json.dumps(eval_schema, indent=2))
-print("\nNote: lab_id now has x-eval-required: false.")
-print("      'required' array removed, replaced by per-field x-eval-required.")
+    _section("Step 2: Add default x-eval-* annotations")
+    eval_schema = deepcopy(schema)
+    add_default_xeval(eval_schema)
+    print(json.dumps(eval_schema, indent=2))
+    print("\nNote: lab_id now has x-eval-required: false.")
+    print("      'required' array removed, replaced by per-field x-eval-required.")
 
-# ---------------------------------------------------------------------------
-# 4. Simulate user edits
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # 4. Simulate user edits
+    # ---------------------------------------------------------------------------
 
-section("Step 3: User edits eval schema")
+    _section("Step 3: User edits eval schema")
 
-eval_schema["properties"]["method"]["x-eval-compare"] = {
-    "oneof": {
-        "values": [
-            "Chemical Vapor Deposition", "CVD",
-            "Sputtering", "Sputter Deposition",
-            "Pulsed Laser Deposition", "PLD",
-        ]
+    eval_schema["properties"]["method"]["x-eval-compare"] = {
+        "oneof": {
+            "values": [
+                "Chemical Vapor Deposition", "CVD",
+                "Sputtering", "Sputter Deposition",
+                "Pulsed Laser Deposition", "PLD",
+            ]
+        }
     }
-}
 
-eval_schema["properties"]["temperature"]["x-eval-compare"] = {
-    "numeric": {"tolerance": {"rel": 0.01}}
-}
+    eval_schema["properties"]["temperature"]["x-eval-compare"] = {
+        "numeric": {"tolerance": {"rel": 0.01}}
+    }
 
-print("- method: exact -> oneof with known synonyms")
-print("- temperature: numeric -> numeric with 1% relative tolerance")
-print("- lab_id: kept as x-eval-required: false (from inference)")
+    print("- method: exact -> oneof with known synonyms")
+    print("- temperature: numeric -> numeric with 1% relative tolerance")
+    print("- lab_id: kept as x-eval-required: false (from inference)")
 
-# ---------------------------------------------------------------------------
-# 5. Run evaluation
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # 5. Run evaluation
+    # ---------------------------------------------------------------------------
 
-section("Step 4: Run evaluation")
-run = evaluate(GOLD, EXTRACTED, schema=eval_schema)
+    _section("Step 4: Run evaluation")
+    run = evaluate(GOLD, EXTRACTED, schema=eval_schema)
 
-# ---------------------------------------------------------------------------
-# 6. Inspect results
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # 6. Inspect results
+    # ---------------------------------------------------------------------------
 
-section("Results: Run Summary")
-print(f"  Records:        {run.total_records}")
-print(f"  Fields scored:  {run.total_fields}")
-print(f"  Precision:      {run.mean_precision:.3f}")
-print(f"  Recall:         {run.mean_recall:.3f}")
-print(f"  F1:             {run.mean_f1:.3f}")
-print(f"  Omissions:      {run.total_omissions}")
-print(f"  Hallucinations: {run.total_hallucinations}")
+    _section("Results: Run Summary")
+    print(f"  Records:        {run.total_records}")
+    print(f"  Fields scored:  {run.total_fields}")
+    print(f"  Precision:      {run.mean_precision:.3f}")
+    print(f"  Recall:         {run.mean_recall:.3f}")
+    print(f"  F1:             {run.mean_f1:.3f}")
+    print(f"  Omissions:      {run.total_omissions}")
+    print(f"  Hallucinations: {run.total_hallucinations}")
 
-section("Results: Per-Field Breakdown")
-print(f"  {'Field Path':<25} {'Score':>6} {'Match':>6} {'Mis':>6} {'Omit':>6} {'Hall':>6}")
-print(f"  {'-'*25} {'-'*6} {'-'*6} {'-'*6} {'-'*6} {'-'*6}")
-for path, agg in sorted(run.per_field.items()):
-    print(
-        f"  {path:<25} {agg.mean_score:>6.2f} {agg.matches:>6} "
-        f"{agg.mismatches:>6} {agg.omissions:>6} {agg.hallucinations:>6}"
-    )
+    _section("Results: Per-Field Breakdown")
+    print(f"  {'Field Path':<25} {'Score':>6} {'Match':>6} {'Mis':>6} {'Omit':>6} {'Hall':>6}")
+    print(f"  {'-'*25} {'-'*6} {'-'*6} {'-'*6} {'-'*6} {'-'*6}")
+    for path, agg in sorted(run.per_field.items()):
+        print(
+            f"  {path:<25} {agg.mean_score:>6.2f} {agg.matches:>6} "
+            f"{agg.mismatches:>6} {agg.omissions:>6} {agg.hallucinations:>6}"
+        )
 
-section("Results: All Records")
-for record in sorted(run.records, key=lambda r: r.f1):
-    print(f"  Record {record.record_id} -- F1: {record.f1:.3f}  "
-          f"P: {record.precision:.3f}  R: {record.recall:.3f}")
-    print(f"  {'Field':<25} {'Gold':<20} {'Extracted':<20} {'Score':>5} {'Status'}")
-    print(f"  {'-'*25} {'-'*20} {'-'*20} {'-'*5} {'-'*15}")
-    for fr in record.field_results:
-        g = str(fr.gold_value)[:19]
-        e = str(fr.extracted_value)[:19]
-        print(f"  {fr.path:<25} {g:<20} {e:<20} {fr.score:>5.1f} {fr.status}")
-    print()
+    _section("Results: All Records")
+    for record in sorted(run.records, key=lambda r: r.f1):
+        print(f"  Record {record.record_id} -- F1: {record.f1:.3f}  "
+              f"P: {record.precision:.3f}  R: {record.recall:.3f}")
+        print(f"  {'Field':<25} {'Gold':<20} {'Extracted':<20} {'Score':>5} {'Status'}")
+        print(f"  {'-'*25} {'-'*20} {'-'*20} {'-'*5} {'-'*15}")
+        for fr in record.field_results:
+            g = str(fr.gold_value)[:19]
+            e = str(fr.extracted_value)[:19]
+            print(f"  {fr.path:<25} {g:<20} {e:<20} {fr.score:>5.1f} {fr.status}")
+        print()
+
+
+if __name__ == "__main__":
+    main()
