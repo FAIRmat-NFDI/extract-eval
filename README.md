@@ -4,7 +4,7 @@ Domain-agnostic evaluation for LLM JSON extraction quality.
 
 Exact match is useless for structured extraction -- there is no single correct JSON for a given text. This package does per-field content comparison using type-specific comparators, structural alignment, and precision/recall metrics.
 
-**This package is a comparator, not a validator.** It does not enforce JSON Schema constraints (`default`, `minLength`, `format`, `enum`, type coercion, etc.). It only uses the schema for structure -- what fields exist, what types they are, and how to compare them. If your schema has `"default": null` or `"format": "date"`, this package ignores those. Validation belongs to your extraction pipeline; this package evaluates the result.
+**This package is a comparator, not a validator.** It does not enforce JSON Schema constraints (`default`, `minLength`, `format`, `enum` etc.). It only uses the schema for structure -- what fields exist, what types they are, and how to compare them. If your schema has `"default": null` or `"format": "date"`, this package ignores those. Validation belongs to your extraction pipeline; this package evaluates the result.
 
 **The schema input is a simplified "resolved" schema.** It contains only `type`, `properties`, `items`, and `required` -- pure structure. Composition keywords (`$ref`, `allOf`, `anyOf`, `oneOf`), conditionals (`if`/`then`/`else`), and constraint keywords are not supported. If your original schema uses these, resolve them yourself before passing to this package (e.g., inline `$ref`, flatten `allOf`, pick the matched branch for `oneOf`). By the time data reaches this package, the only question is: what fields exist and what type are they.
 
@@ -20,10 +20,11 @@ Requires Python >= 3.10.
 
 ## Quick Start
 
-The simplest usage -- pass gold and extracted instances, let the package infer everything:
+Evaluation is intentionally step-by-step: the default `x-eval-*` config is a best guess and **must be reviewed by a human** before running. There is no "do everything automatically" mode.
 
 ```python
-from struct_extract_eval import evaluate
+import json
+from struct_extract_eval import evaluate, generate_eval_schema
 
 gold = [
     {"method": "sputtering", "temperature": 300, "lab_id": "A1"},
@@ -34,7 +35,18 @@ extracted = [
     {"method": "evaporation", "temperature": 460, "lab_id": "B3"},
 ]
 
-result = evaluate(gold=gold, extracted=extracted)
+# 1. Generate an eval schema from gold (or provide your own resolved schema)
+eval_schema = generate_eval_schema(gold=gold)
+with open("eval_schema.json", "w") as f:
+    json.dump(eval_schema, f, indent=2)
+
+# 2. Open eval_schema.json, review comparators, tolerances, required flags,
+#    transforms. This step is not optional.
+
+# 3. Load the reviewed schema and run evaluation
+with open("eval_schema.json") as f:
+    eval_schema = json.load(f)
+result = evaluate(gold=gold, extracted=extracted, schema=eval_schema)
 
 print(f"F1: {result.mean_f1:.2f}")
 print(f"Precision: {result.mean_precision:.2f}")
@@ -45,13 +57,13 @@ for path, agg in result.per_field.items():
     print(f"  {path}: mean={agg.mean_score:.2f}  matches={agg.matches}  mismatches={agg.mismatches}")
 ```
 
-When no schema is provided, one is inferred from the gold instances with default comparators (strings get `exact`, numbers get `numeric`). For more control, follow the step-by-step workflow below.
+`evaluate()` requires an eval schema. Passing a raw resolved schema (without `x-eval-*` annotations) will raise a `SchemaError`. This is deliberate -- it forces you to inspect and confirm the evaluation config before running.
 
 ---
 
 ## How Evaluation Works
 
-Evaluation has four steps. Each produces an inspectable artifact. You can run all at once via `evaluate()`, or step through them to customize.
+Evaluation has four steps. Each produces an inspectable artifact that you should review before moving to the next.
 
 
 ### Step 1: Get a Resolved Schema From Gold Instances or Provide Your Own
@@ -61,33 +73,34 @@ A resolved schema describes the structure of your data -- what fields exist and 
 **Option A: Infer from gold instances.**
 
 ```python
+import json
 from struct_extract_eval import infer_schema
-from struct_extract_eval.io import save_json
 
 gold = [
     {"method": "sputtering", "temperature": 300, "lab_id": "A1"},
-    {"method": "evaporation", "temperature": 450}, 
+    {"method": "evaporation", "temperature": 450},
 ]
 
-schema = infer_schema(gold)
-save_json(schema, "resolved_schema.json")
+resolved_schema = infer_schema(gold)
+with open("resolved_schema.json", "w") as f:
+    json.dump(resolved_schema, f, indent=2)
 ```
 
-This produces:
+This produces a resolved schema:
 
 ```json
 {
   "type": "object",
   "properties": {
+    "lab_id": { "type": "string" },
     "method": { "type": "string" },
-    "temperature": { "type": "integer" },
-    "lab_id": { "type": "string", "x-eval-required": false }
+    "temperature": { "type": "integer" }
   },
-    "required": ["method", "temperature"]
+  "required": ["method", "temperature"]
 }
 ```
 
-`lab_id` is absent in the second instance, so it is not in the `required` array.
+`lab_id` is absent in the second instance, so it is not included in the `required` array. `method` and `temperature` are present in every instance and are therefore marked required.
 
 **Option B: Provide your own.** If you already have a clean schema with only `type`, `properties`, `items`, and `required`, pass it directly.
 
@@ -96,27 +109,30 @@ This produces:
 Add `x-eval-*` extension keys that tell the evaluator how to compare each field:
 
 ```python
+import json
 from struct_extract_eval import generate_eval_schema
-from struct_extract_eval.io import save_json
 
-eval_schema = generate_eval_schema(schema=schema)
-save_json(eval_schema, "eval_schema.json")
+eval_schema = generate_eval_schema(schema=resolved_schema)
+with open("eval_schema.json", "w") as f:
+    json.dump(eval_schema, f, indent=2)
 ```
 
-This produces:
+This produces a eval schema with defaults:
 
 ```json
 {
   "type": "object",
   "properties": {
+    "lab_id": { "type": "string", "x-eval-required": false, "x-eval-compare": "exact" },
     "method": { "type": "string", "x-eval-compare": "exact" },
-    "temperature": { "type": "integer", "x-eval-compare": "numeric" },
-    "lab_id": { "type": "string", "x-eval-required": false, "x-eval-compare": "exact" }
+    "temperature": { "type": "integer", "x-eval-compare": "numeric" }
   }
 }
 ```
 
-Default comparators are assigned by type:
+`add_default_xeval()` removes the `required` array from the resolved schema and instead annotates each optional field with `x-eval-required: false`. Required fields (the default) carry no annotation.
+
+Default comparators are assigned by type (see [`_default_comparator`](src/struct_extract_eval/xeval.py#L46) for the exact rules):
 
 | Field type | Default comparator |
 |---|---|
@@ -153,16 +169,16 @@ Open `eval_schema.json` and adjust. This is where you make the evaluation fit yo
 
 What changed:
 - `method` added `lowercase` + `strip` transforms for normalization.
-- `temperature` now has a 5% relative tolerance, so 300 vs 315 would still score > 0.
-- `lab_id` stays optional and exact -- no changes needed.
+- `temperature` now has a 5% relative tolerance, so 300 vs 315 would still score 1.
 
 ### Step 4: Run Evaluation
 
 ```python
+import json
 from struct_extract_eval import evaluate
-from struct_extract_eval.io import load_json
 
-eval_schema = load_json("eval_schema.json")
+with open("eval_schema.json") as f:
+    eval_schema = json.load(f)
 
 result = evaluate(
     gold=gold,
@@ -181,11 +197,12 @@ for path, agg in result.per_field.items():
           f"omissions={agg.omissions}")
 ```
 
-[//]: # (Steps 1-3 are optional. If you pass no schema to `evaluate&#40;&#41;`, it infers and annotates automatically. The explicit steps let you control what matters: which fields are compared, how, and whether missing fields are penalized.)
+[//]: # (todo: add run result here.)
 
 ---
 
-## How Fields Are Counted
+## Explaining the Metrics
+### How Fields Are Counted
 
 The evaluator walks the schema tree (not the data). Only **leaf fields** (strings, numbers, booleans) are scored -- container nodes (objects, arrays) are structural scaffolding. For each leaf, it checks presence in gold and extracted:
 
@@ -224,7 +241,7 @@ If `lab_id` were required (the default), it would be an **omission**: 3 fields s
 
 ---
 
-## Scoring: Precision, Recall, F1
+### Scoring: Precision, Recall, F1
 
 Each record gets precision, recall, and F1 computed from its field results:
 
@@ -407,45 +424,29 @@ The `per_field` breakdown is the primary diagnostic view -- it tells you which s
 
 ---
 
-## File-Based Evaluation
-
-```python
-from struct_extract_eval import evaluate_files
-
-result = evaluate_files(
-    gold_path="data/gold.jsonl",
-    extracted_path="data/extracted.jsonl",
-    schema_path="eval_schema.json",  # optional
-)
-```
-
-Two input modes:
-- **JSONL files**: one JSON object per line, matched by line position.
-- **Directories of JSON files**: matched by filename (e.g., `gold/paper_001.json` pairs with `extracted/paper_001.json`).
-
----
-
 ## API Reference
 
 | Function | Purpose |
 |---|---|
-| `evaluate(gold, extracted, schema?, id_field?)` | Evaluate from Python lists |
-| `evaluate_files(gold_path, extracted_path, schema_path?)` | Evaluate from files |
-| `generate_eval_schema(gold?, schema?)` | Generate eval schema for inspection/editing |
 | `infer_schema(instances)` | Infer resolved schema from gold instances |
-| `add_default_xeval(schema)` | Annotate resolved schema with `x-eval-*` defaults (in-place) |
-| `parse_schema(schema)` | Parse eval schema into internal tree representation |
+| `generate_eval_schema(gold?, schema?)` | Generate eval schema (resolved + `x-eval-*` defaults) for review |
+| `add_default_xeval(schema)` | Annotate a resolved schema with `x-eval-*` defaults (in-place) |
+| `evaluate(gold, extracted, schema, id_field?)` | Evaluate gold vs extracted using a reviewed eval schema |
+| `parse_schema(schema)` | Parse an eval schema into the internal tree representation |
+
+`evaluate()` requires `schema` -- you must generate and review an eval schema before calling it.
 
 ---
 
 ## Terminology
 
-| Term | Meaning |
-|---|---|
-| **Instance** | A JSON object with actual data values. Both gold (ground truth) and extracted (LLM output) are instances. |
-| [**JSON Schema**](https://json-schema.org/) | A standard JSON Schema (`type`, `properties`, `required`, etc.) with no eval-specific extensions. |
-| **Resolved schema** | A schema containing only `type`, `properties`, `items`, and `required`. All composition (`$ref`, `allOf`, `anyOf`, `oneOf`), conditional (`if/then/else`), and constraint (`minLength`, `format`, etc.) keywords removed. This is the clean structural input the package accepts. |
-| **Eval schema** | A resolved schema annotated with `x-eval-*` extension keys. `required` arrays are replaced by per-field `x-eval-required` (only annotated when `false`; `true` is the default). Produced by `add_default_xeval()`. Single source of truth for eval config. |
+| Term                                        | Meaning                                                                                                                                                                                                                                                                                                                                                                                                             |
+|---------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Instance**                                | A JSON object with actual data values. Both gold (ground truth) and extracted (LLM output) are instances.                                                                                                                                                                                                                                                                                                           |
+| [**JSON Schema**](https://json-schema.org/) | A standard JSON Schema (`type`, `properties`, `required`, etc.) with no eval-specific extensions.                                                                                                                                                                                                                                                                                                                   |
+| **Resolved schema**                         | A schema containing only `type`, `properties`, `items`, and `required`. No composition or conditional keywords (`$ref`, `allOf`, `anyOf`, `oneOf`, `if/then/else`). No constraint keywords (`minLength`, `format`, etc.). No `x-eval-*`. This is the clean structural input the package accepts.                                                                                                                    |
+| **Eval schema**                             | A resolved schema annotated with `x-eval-*` extension keys and without verbose required field. no composition, conditions, constraints, or eval config. Just type/properties/items/x-eval-required (only false annotated, true is default)/ x-eval-compare / x-eval-transform. Produced by running `add_default_xeval()` on a resolved schema. Single source of truth for validation and eval config. |
+| **SchemaNode tree**                         | Internal parsed representation of an eval schema. All downstream code works with `SchemaNode`, never raw dicts.                                                                                                                                                                                                                                                                                                     |
 
 ---
 
