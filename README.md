@@ -1,20 +1,39 @@
 # Struct Extract Eval
 
-Domain-agnostic evaluation for LLM JSON extraction quality.
+Domain-agnostic, field-level evaluation for LLM structured JSON extraction.
 
-Exact match is useless for structured extraction -- there is no single correct JSON for a given text. This package does
-per-field content comparison using type-specific comparators, structural alignment, and precision/recall metrics.
+## The Problem
+
+Given text and a JSON schema, an LLM produces a JSON instance. Exact match against a gold JSON is useless: there is no
+single correct output. `"New York"` vs `"NYC"`, `42` vs `42.0` -- both semantically
+equivalent, all fail string equality. Worse, a single overall score tells you nothing about *which* fields are wrong or
+*how* they are wrong -- missed, hallucinated, or slightly off.
+
+## The Approach
+
+Walk the schema, compare each field with the right tool for its type, and aggregate:
+
+- **Per-field comparators** -- `exact` for IDs and enums, `numeric` with tolerance for floats, `oneof` for known
+  synonyms, `semantic` for free text via an LLM judge, `skip` for fields with no correct answer. Custom comparators can
+  be registered.
+- **Transforms** -- chain preprocessing steps (`lowercase`, `strip`, `round_digits`, ...) before comparison.
+- **Structural alignment** -- match objects by key name, arrays by position or by a key field.
+- **Precision / recall / F1** -- precision penalizes hallucinated fields, recall penalizes omissions. Per-record and
+  per-field aggregation show exactly where the extractor fails.
+
+All configuration lives in the schema itself, as `x-eval-*` extension keys: one file, no drift between validation and
+evaluation config.
+
+## Scope
 
 **This package is a comparator, not a validator.** It does not enforce JSON Schema constraints (`default`, `minLength`,
-`format`, `enum` etc.). It only uses the schema for structure -- what fields exist, what types they are, and how to
-compare them. If your schema has `"default": null` or `"format": "date"`, this package ignores those. Validation belongs
-to your extraction pipeline; this package evaluates the result.
+`format`, `enum`, etc.). It uses the schema only for structure and eval config. Validation belongs to your extraction
+pipeline; this package evaluates the result.
 
-**The schema input is a simplified "resolved" schema.** It contains only `type`, `properties`, `items`, and`required` --
-pure structure. Composition keywords (`$ref`, `allOf`, `anyOf`, `oneOf`), conditionals (`if`/`then`/`else`), and
-constraint keywords are not supported. If your original schema uses these, resolve them yourself before passing to this
-package (e.g., inline `$ref`, flatten `allOf`, pick the matched branch for `oneOf`). By the time data reaches this
-package, the only question is: what fields exist and what type are they.
+**The schema input is a simplified "resolved" schema** -- only `type`, `properties`, `items`, and `required`.
+Composition (`$ref`, `allOf`, `anyOf`, `oneOf`), conditionals (`if`/`then`/`else`), and constraints are not supported.
+If your original schema uses these, resolve them yourself before passing it in. By the time data reaches this package,
+the only question is: what fields exist and what type are they.
 
 ## Installation
 
