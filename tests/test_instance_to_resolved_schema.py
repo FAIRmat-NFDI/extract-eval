@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 
 from struct_extract_eval.core.instance_to_resolved_schema import infer_schema
@@ -18,6 +16,8 @@ class TestInferSchema:
         assert props["name"] == {"type": "string"}
         assert props["age"] == {"type": "integer"}
         assert props["active"] == {"type": "boolean"}
+        # all fields present in all instances -> all required
+        assert sorted(schema["required"]) == ["active", "age", "name"]
 
     def test_float_inferred_as_number(self) -> None:
         schema = infer_schema([{"temp": 3.14}])
@@ -28,9 +28,12 @@ class TestInferSchema:
             {"name": "Alice", "email": "a@b.com"},
             {"name": "Bob"},
         ])
-        props = schema["properties"]
-        assert "x-eval-required" not in props["name"]
-        assert props["email"]["x-eval-required"] is False
+        # name is in both -> required, email is not -> absent from required
+        assert "name" in schema["required"]
+        assert "email" not in schema["required"]
+        # no x-eval-required on individual fields
+        assert "x-eval-required" not in schema["properties"]["name"]
+        assert "x-eval-required" not in schema["properties"]["email"]
 
     def test_all_null_field(self) -> None:
         schema = infer_schema([{"x": None}, {"x": None}])
@@ -41,6 +44,7 @@ class TestInferSchema:
         outer = schema["properties"]["outer"]
         assert outer["type"] == "object"
         assert outer["properties"]["inner"] == {"type": "string"}
+        assert outer["required"] == ["inner"]
 
     def test_array_of_primitives(self) -> None:
         schema = infer_schema([{"tags": ["a", "b"]}])
@@ -56,13 +60,9 @@ class TestInferSchema:
         assert items_schema["type"] == "object"
         assert items_schema["properties"]["id"] == {"type": "string"}
         assert items_schema["properties"]["val"] == {"type": "integer"}
+        assert sorted(items_schema["required"]) == ["id", "val"]
 
     def test_array_elements_flattened_across_instances(self) -> None:
-        """Multiple instances with arrays -- elements are pooled to infer items type.
-
-        Instance 1 has tags ["a", "b"], instance 2 has tags ["c"].
-        All elements are flattened to ["a", "b", "c"] before inferring items type.
-        """
         schema = infer_schema([
             {"tags": ["a", "b"]},
             {"tags": ["c"]},
@@ -87,7 +87,10 @@ class TestInferSchema:
         assert items_schema["properties"]["property"] == {"type": "string"}
         assert items_schema["properties"]["value"] == {"type": "number"}
         assert items_schema["properties"]["unit"]["type"] == "string"
-        assert items_schema["properties"]["unit"]["x-eval-required"] is False
+        # unit only in one element -> not required
+        assert "unit" not in items_schema["required"]
+        assert "property" in items_schema["required"]
+        assert "value" in items_schema["required"]
 
     def test_empty_array(self) -> None:
         schema = infer_schema([{"tags": []}])
@@ -102,9 +105,8 @@ class TestInferSchema:
         ])
         props = schema["properties"]
         assert set(props.keys()) == {"a", "b", "c"}
-        assert "x-eval-required" not in props["a"]  # present in both
-        assert props["b"]["x-eval-required"] is False  # missing in second
-        assert props["c"]["x-eval-required"] is False  # missing in first
+        # a is in both -> required; b and c are each missing in one -> not required
+        assert schema["required"] == ["a"]
 
     def test_deeply_nested(self) -> None:
         schema = infer_schema([{
@@ -119,12 +121,6 @@ class TestInferSchema:
         assert leaf["type"] == "number"
 
     def test_deeply_nested_multiple_instances(self) -> None:
-        """Three instances with varying structure at every level.
-
-        Instance 1: one sample, one measurement, no metadata
-        Instance 2: two samples, one with unit, one with error_bar, plus metadata
-        Instance 3: one sample with all fields, metadata with extra key
-        """
         schema = infer_schema([
             {
                 "experiment": {
@@ -176,57 +172,45 @@ class TestInferSchema:
             },
         ])
 
-        # Top-level structure
+        # Top-level: experiment is required
+        assert schema["required"] == ["experiment"]
+
+        # experiment.name -- present in all instances -> required
         experiment = get_node_at_path(schema, "experiment")
-        assert experiment is not None
-        assert experiment["type"] == "object"
+        assert "name" in experiment["required"]
+        assert "samples" in experiment["required"]
+        # metadata missing in first instance -> not required
+        assert "metadata" not in experiment["required"]
 
-        # experiment.name -- present in all instances
-        name = get_node_at_path(schema, "experiment.name")
-        assert name == {"type": "string"}
-
-        # experiment.metadata -- missing in first instance
+        # experiment.metadata.operator -- present in all metadata instances
         metadata = get_node_at_path(schema, "experiment.metadata")
         assert metadata is not None
         assert metadata["type"] == "object"
-        assert metadata["x-eval-required"] is False
-
-        # experiment.metadata.operator -- present in all metadata instances
-        operator = get_node_at_path(schema, "experiment.metadata.operator")
-        assert operator == {"type": "string"}
-
-        # experiment.metadata.date -- only in third instance's metadata
-        date = get_node_at_path(schema, "experiment.metadata.date")
-        assert date is not None
-        assert date["type"] == "string"
-        assert date["x-eval-required"] is False
+        assert "operator" in metadata["required"]
+        # date only in third instance's metadata -> not required
+        assert "date" not in metadata["required"]
 
         # samples[].id -- present in all samples
-        sample_id = get_node_at_path(schema, "experiment.samples[].id")
-        assert sample_id == {"type": "string"}
+        samples_items = get_node_at_path(schema, "experiment.samples[]")
+        assert "id" in samples_items["required"]
 
         # Deep leaf fields
-        prop = get_node_at_path(schema, "experiment.samples[].measurements[].property")
-        assert prop is not None
-        assert prop["type"] == "string"
-
-        value = get_node_at_path(schema, "experiment.samples[].measurements[].value")
-        assert value is not None
-        assert value["type"] == "number"
-
-        # unit -- missing in some measurements
-        unit = get_node_at_path(schema, "experiment.samples[].measurements[].unit")
-        assert unit is not None
-        assert unit["type"] == "string"
-        assert unit["x-eval-required"] is False
-
-        # error_bar -- missing in some measurements
-        error_bar = get_node_at_path(schema, "experiment.samples[].measurements[].error_bar")
-        assert error_bar is not None
-        assert error_bar["type"] == "number"
-        assert error_bar["x-eval-required"] is False
+        measurements_items = get_node_at_path(schema, "experiment.samples[].measurements[]")
+        assert "property" in measurements_items["required"]
+        assert "value" in measurements_items["required"]
+        # unit and error_bar missing in some measurements -> not required
+        assert "unit" not in measurements_items["required"]
+        assert "error_bar" not in measurements_items["required"]
 
     def test_bool_before_int(self) -> None:
         """bool is subclass of int in Python -- must check bool first."""
         schema = infer_schema([{"flag": True}])
         assert schema["properties"]["flag"] == {"type": "boolean"}
+
+    def test_no_required_array_when_all_optional(self) -> None:
+        """When no field is present in all instances, no required array."""
+        schema = infer_schema([
+            {"a": 1},
+            {"b": 2},
+        ])
+        assert "required" not in schema
