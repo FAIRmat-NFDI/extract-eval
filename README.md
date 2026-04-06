@@ -17,7 +17,7 @@ Walk the schema, compare each field with the right tool for its type, and aggreg
   synonyms, `semantic` for free text via an LLM judge, `skip` for fields with no correct answer. Custom comparators can
   be registered.
 - **Transforms** -- chain preprocessing steps (`lowercase`, `strip`, `round_digits`, ...) before comparison.
-- **Structural alignment** -- match objects by key name, arrays by position or by a key field.
+- **Structural alignment** -- match objects by key name, arrays by position (key-field and Hungarian matching planned).
 - **Precision / recall / F1** -- precision penalizes hallucinated fields, recall penalizes omissions. Per-record and
   per-field aggregation show exactly where the extractor fails.
 
@@ -308,8 +308,9 @@ recall.
 - **Required parent is missing from extracted:** every leaf descendant becomes an omission. Same data as above but with `process` required → 3 omissions, all score 0.
 - **Parent is present:** children are evaluated normally using their own `x-eval-required` flags.
 - **Fields with `skip` comparator** always score 1.0 and are excluded from precision, recall, F1, and `total_fields`. 
-- **Only schema-defined fields are evaluated.** Fields in the data that don't appear in the schema are invisible to the
-  evaluator but extra field can trough error if the resolved schema additionalProperties False.
+- **Only schema-defined fields are evaluated.** Extra fields in the data that don't appear in the schema are invisible to
+  the evaluator -- no penalty, no hallucination. See [#26](https://github.com/FAIRmat-NFDI/extract-eval/issues/26) for
+  planned `additionalProperties` support.
 
 ---
 
@@ -330,8 +331,8 @@ Each record gets precision, recall, and F1 computed from its field results:
 | Comparator | Use case                              | Score                                                                                                                                                                                                            |
 |------------|---------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `exact`    | Booleans, enums, IDs, short strings   | 0 or 1. Strict type and value equality. Use `x-eval-transform` (e.g., `["lowercase", "strip"]`) for case/whitespace-insensitive matching.                                                                        |
-| `numeric`  | Numbers                               | Continuous [0, 1]. When tolerance is configured, score reflects how close the values are. Without tolerance, defaults to exact float equality (usually not what you want -- configure `rel` or `abs` tolerance). |
-| `semantic` | Strings where synonyms are valid      | 0 or 1 (LLM-as-judge). Short-circuits on exact string match.                                                                                                                                                     |
+| `numeric`  | Numbers                               | 0 or 1. Within tolerance = 1, outside = 0. Configure `rel` and/or `abs` tolerance. Without tolerance, defaults to exact float equality.                                                                          |
+| `semantic` | Strings where synonyms are valid      | 0 or 1. Short-circuits on exact string match. Otherwise defers to LLM judge (not yet implemented -- currently scores 0 for non-exact matches).                                                                    |
 | `oneof`    | Fields with known acceptable synonyms | 1 if extracted matches any value in list, 0 otherwise. Config: `{"oneof": {"values": ["PVD", "Sputtering"]}}`                                                                                                    |
 | `skip`     | any field does not need to compare    | Always 1. Not counted as a scored field -- excluded from precision, recall, F1, and `total_fields`.                                                                                                              |
 
