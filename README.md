@@ -333,7 +333,7 @@ Each record gets precision, recall, and F1 computed from its field results:
 | `numeric`  | Numbers                               | Continuous [0, 1]. When tolerance is configured, score reflects how close the values are. Without tolerance, defaults to exact float equality (usually not what you want -- configure `rel` or `abs` tolerance). |
 | `semantic` | Strings where synonyms are valid      | 0 or 1 (LLM-as-judge). Short-circuits on exact string match.                                                                                                                                                     |
 | `oneof`    | Fields with known acceptable synonyms | 1 if extracted matches any value in list, 0 otherwise. Config: `{"oneof": {"values": ["PVD", "Sputtering"]}}`                                                                                                    |
-| `skip`     | Free-text with no correct answer      | Always 1. Not counted as a scored field -- excluded from precision, recall, F1, and `total_fields`.                                                                                                              |
+| `skip`     | any field does not need to compare    | Always 1. Not counted as a scored field -- excluded from precision, recall, F1, and `total_fields`.                                                                                                              |
 
 ### Custom Comparators
 
@@ -344,22 +344,33 @@ from struct_extract_eval.core.comparators.registry import register
 from struct_extract_eval.core.comparators.comparator import ComparatorResult
 
 
-def compare_formula(gold, extracted, params):
-    # your domain-specific comparison logic
-    return ComparatorResult(score=1.0, comparator="formula")
+def compare_date(gold, extracted, params):
+    """Compare dates regardless of format (e.g., '2025-01-15' vs 'Jan 15, 2025')."""
+    from datetime import datetime
+    formats = params.get("formats", ["%Y-%m-%d", "%b %d, %Y", "%d/%m/%Y"])
+    def parse(val):
+        for fmt in formats:
+            try:
+                return datetime.strptime(str(val), fmt)
+            except ValueError:
+                continue
+        return None
+    g, e = parse(gold), parse(extracted)
+    score = 1.0 if (g and e and g == e) else 0.0
+    return ComparatorResult(score=score, comparator="date")
 
 
-register("formula", compare_formula)
+register("date", compare_date)
 ```
 
-Schema: `"x-eval-compare": {"formula": {"normalize_hydrates": true}}`
+Schema: `"x-eval-compare": {"date": {"formats": ["%Y-%m-%d", "%b %d, %Y"]}}`
 
 ---
 
 ## Transforms
 
-Transforms preprocess both gold and extracted values before comparison. Chained left to right, each receives the output
-of the previous. Skipped when value is `null`.
+Transforms preprocess both gold and extracted values before comparison. Only applied when `x-eval-transform` is set on a
+field. Chained left to right, each receives the output of the previous. Skipped when value is `null`.
 
 | Transform              | Params            | What it does                                      |
 |------------------------|-------------------|---------------------------------------------------|
@@ -372,8 +383,8 @@ of the previous. Skipped when value is `null`.
 **Example:** With `"x-eval-transform": ["strip", "lowercase"]`:
 
 ```
-Gold:      "  Sputter Deposition "  -->  "sputter deposition"
-Extracted: "sputter deposition"      -->  "sputter deposition"
+Gold:      "  New York City "  -->  "new york city"
+Extracted: "new york city"     -->  "new york city"
 ```
 
 These transformed values are then passed to the comparator. With `exact`, this would score 1.0.
@@ -433,21 +444,21 @@ These transformed values are then passed to the comparator. With `exact`, this w
 
 All evaluation config lives in the JSON schema. No separate config file.
 
-| Key                | Purpose                          | Default            | Example                                                   |
-|--------------------|----------------------------------|--------------------|-----------------------------------------------------------|
-| `x-eval-required`  | Penalize absence?                | `true`             | `false`                                                   |
-| `x-eval-compare`   | Which comparator to use          | inferred from type | `"semantic"`, `{"numeric": {"tolerance": {"rel": 0.01}}}` |
-| `x-eval-transform` | Preprocessing chain (both sides) | none               | `["lowercase", "strip"]`                                  |
-| `x-eval-align`     | Array element matching strategy  | Hungarian          | `{"match_by": "key_field", "key": "name"}`                |
+| Key                         | Purpose                                                             | Default            | Example                                                   |
+|-----------------------------|---------------------------------------------------------------------|--------------------|-----------------------------------------------------------|
+| `x-eval-required`           | Penalize absence?                                                   | `true`             | `false`                                                   |
+| `x-eval-compare`            | Which comparator to use                                             | inferred from type | `"semantic"`, `{"numeric": {"tolerance": {"rel": 0.01}}}` |
+| `x-eval-transform`          | Preprocessing chain (both sides)                                    | none               | `["lowercase", "strip"]`                                  |
+| `x-eval-allow-extra-fields` | at root level, role is similar to json schema `addtionalProperties` | false              | true                                                      |
 
 ### Config Syntax
 
 Both `x-eval-transform` and `x-eval-compare` use the same two shapes:
 
-| Shape             | Example                                     | Meaning                                |
-|-------------------|---------------------------------------------|----------------------------------------|
-| String            | `"exact"`                                   | No parameters                          |
-| Single-key object | `{"numeric": {"tolerance": {"rel": 0.01}}}` | With parameters (value must be a dict) |
+| Shape             | Example                                     | Meaning                                          |
+|-------------------|---------------------------------------------|--------------------------------------------------|
+| String            | `"exact"`                                   | No parameters, it is the same as `{"exact": {}}` |
+| Single-key object | `{"numeric": {"tolerance": {"rel": 0.01}}}` | With parameters (value must be a dict)           |
 
 `{"round_digits": 2}` is **invalid** -- use `{"round_digits": {"digits": 2}}`. Parameters are always a dict, never a
 scalar.
@@ -474,7 +485,7 @@ scalar.
 | `mean_precision`       | `float`                       | Mean across records                   |
 | `mean_recall`          | `float`                       | Mean across records                   |
 | `mean_f1`              | `float`                       | Mean across records                   |
-| `total_records`        | `int`                         | Number of records evaluated           |
+| `total_records`        | `int`                         | Number of json record evaluated       |
 | `total_fields`         | `int`                         | Total scored fields (excludes `skip`) |
 | `total_omissions`      | `int`                         | Fields missing from extracted         |
 | `total_hallucinations` | `int`                         | Extra elements in extracted           |
@@ -500,12 +511,12 @@ with.
 | Function                                       | Purpose                                                          |
 |------------------------------------------------|------------------------------------------------------------------|
 | `infer_schema(instances)`                      | Infer resolved schema from gold instances                        |
-| `generate_eval_schema(gold?, schema?)`         | Generate eval schema (resolved + `x-eval-*` defaults) for review |
 | `add_default_xeval(schema)`                    | Annotate a resolved schema with `x-eval-*` defaults (in-place)   |
+| `generate_eval_schema(golds)`                  | Generate eval schema (resolved + `x-eval-*` defaults) for review |
 | `evaluate(gold, extracted, schema, id_field?)` | Evaluate gold vs extracted using a reviewed eval schema          |
 | `parse_schema(schema)`                         | Parse an eval schema into the internal tree representation       |
 
-`evaluate()` requires `schema` -- you must generate and review an eval schema before calling it.
+`evaluate()` requires resolved schema -- you must generate and review an eval schema before calling it.
 
 ---
 
@@ -520,13 +531,3 @@ with.
 | **SchemaNode tree**                         | Internal parsed representation of an eval schema. All downstream code works with `SchemaNode`, never raw dicts.                                                                                                                                                                                                                                                                                       |
 
 ---
-
-## Development
-
-```bash
-pip install -e ".[dev]"
-pytest                                 # all tests
-ruff check .                           # lint
-ruff format .                          # format
-mypy src/struct_extract_eval/          # type check
-```
