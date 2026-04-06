@@ -300,14 +300,11 @@ recall.
 
 - **`null` is a value, not absence.** A key present with value `null` is different from a missing key. `null` vs
   `"alice"` is a mismatch (score 0). `null` vs `null` is a match (score 1).
-  **`x-eval-required` is not inherited.** An optional parent does not make
-  -its children optional, and children's `required` flags do not "leak" upward
-  -. Two cases:
-- **Optional parent is missing from extracted:** `0` fields are counted.
-- Children are never reached, no penalty, regardless of how many leaves the parent has or whether those leaves are individually required. Gold: `{"process": {"name": "a", "temp": 1, "duration": 60}}`, Extracted: `{}` → 0 field results.
-- **Required parent is missing from extracted:** every leaf descendant becomes an omission. Same data as above but with `process` required → 3 omissions, all score 0.
-- **Parent is present:** children are evaluated normally using their own `x-eval-required` flags.
-- **Fields with `skip` comparator** always score 1.0 and are excluded from precision, recall, F1, and `total_fields`. 
+- **`x-eval-required` is not inherited.** An optional parent does not make its children optional. Two cases:
+  - **Optional parent is missing from extracted:** 0 fields counted. Children are never reached, no penalty.
+  - **Required parent is missing from extracted:** every leaf descendant becomes an omission.
+  - **Parent is present:** children are evaluated normally using their own `x-eval-required` flags.
+- **Fields with `skip` comparator** always score 1.0 and are excluded from precision, recall, F1, and `total_fields`.
 - **Only schema-defined fields are evaluated.** Extra fields in the data that don't appear in the schema are invisible to
   the evaluator -- no penalty, no hallucination. See [#26](https://github.com/FAIRmat-NFDI/extract-eval/issues/26) for
   planned `additionalProperties` support.
@@ -318,11 +315,13 @@ recall.
 
 Each record gets precision, recall, and F1 computed from its field results:
 
-**Precision** = (sum of scores for matched fields) / (matched fields + hallucinated fields)
+**Precision** = matches / (matches + mismatches + hallucinations). "Of what the extractor produced, how much is correct?"
 
-**Recall** = (sum of scores for matched fields) / (matched fields + omitted fields)
+**Recall** = matches / (matches + mismatches + omissions). "Of what gold expected, how much did the extractor get right?"
 
-**metrics** (`mean_precision`, `mean_recall`, `mean_f1`) are the arithmetic mean across all records.
+**F1** = harmonic mean of precision and recall.
+
+**Run-level metrics** (`mean_precision`, `mean_recall`, `mean_f1`) are the arithmetic mean across all records.
 
 ---
 
@@ -528,7 +527,7 @@ with.
 | **Instance**                                | A JSON object with actual data values. Both gold (ground truth) and extracted (LLM output) are instances.                                                                                                                                                                                                                                                                                             |
 | [**JSON Schema**](https://json-schema.org/) | A standard JSON Schema (`type`, `properties`, `required`, etc.) with no eval-specific extensions.                                                                                                                                                                                                                                                                                                     |
 | **Resolved schema**                         | A schema containing only `type`, `properties`, `items`, and `required`. No composition or conditional keywords (`$ref`, `allOf`, `anyOf`, `oneOf`, `if/then/else`). No constraint keywords (`minLength`, `format`, etc.). No `x-eval-*`. This is the clean structural input the package accepts.                                                                                                      |
-| **Eval schema**                             | A resolved schema annotated with `x-eval-*` extension keys and without verbose required field. no composition, conditions, constraints, or eval config. Just type/properties/items/x-eval-required (only false annotated, true is default)/ x-eval-compare / x-eval-transform. Produced by running `add_default_xeval()` on a resolved schema. Single source of truth for validation and eval config. |
+| **Eval schema**                             | A resolved schema annotated with `x-eval-*` extension keys. Contains only `type`, `properties`, `items`, `x-eval-required` (only annotated when `false`; `true` is default), `x-eval-compare`, and `x-eval-transform`. Produced by running `add_default_xeval()` on a resolved schema. Single source of truth for evaluation config. |
 | **SchemaNode tree**                         | Internal parsed representation of an eval schema. All downstream code works with `SchemaNode`, never raw dicts.                                                                                                                                                                                                                                                                                       |
 
 ---
