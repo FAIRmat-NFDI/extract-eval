@@ -6,8 +6,11 @@ def infer_schema(instances: list[object]) -> dict[str, object]:
     any JSON type (str, int, float, bool, list, dict, None).
 
     Merges structure across all instances so optional fields are captured.
-    Fields absent in any instance are marked ``x-eval-required: false``.
-    All-null fields default to ``{"type": "string", "x-eval-compare": "skip"}``.
+    Fields present in all instances appear in the ``required`` array on
+    the parent object. Fields absent in any instance are omitted from
+    ``required`` (meaning they are optional).
+
+    All-null fields default to ``{"type": "string"}``.
 
     Raises ``ValueError`` if *instances* is empty.
     """
@@ -16,7 +19,7 @@ def infer_schema(instances: list[object]) -> dict[str, object]:
 
     present_instances = [instance for instance in instances if instance is not None]
     if not present_instances:
-        return {"type": "string", "x-eval-compare": "skip"}
+        return {"type": "string"}
 
     first = present_instances[0]  # first instance used to decide the instance type
     if isinstance(first, bool):
@@ -63,21 +66,28 @@ def infer_schema(instances: list[object]) -> dict[str, object]:
         #
         #   key="name":  [obj0.get("name"), obj1.get("name")]  = ["A", "B"]
         #     -> infer_schema(["A", "B"])        -> {"type": "string"}
-        #     -> "name" in both objs             -> x-eval-required: true (default)
+        #     -> "name" in both objs             -> added to required
         #
         #   key="unit":  [obj0.get("unit"), obj1.get("unit")]  = [None, "nm"]
         #     -> infer_schema([None, "nm"])       -> {"type": "string"}
-        #     -> "unit" NOT in obj0              -> x-eval-required: false
+        #     -> "unit" NOT in obj0              -> not added to required
         #
         #   key="value": [obj0.get("value"), obj1.get("value")] = [1.5, 3.2]
         #     -> infer_schema([1.5, 3.2])        -> {"type": "number"}
-        #     -> "value" in both objs            -> x-eval-required: true (default)
+        #     -> "value" in both objs            -> added to required
         properties: dict[str, object] = {}
+        required: list[str] = []
         for key in sorted(all_keys):
             field_instances: list[object] = [obj.get(key) for obj in object_instances]
             field_schema = infer_schema(field_instances)
-            if not all(key in obj for obj in object_instances):
-                field_schema["x-eval-required"] = False
             properties[key] = field_schema
-        return {"type": "object", "properties": properties}
+            if all(key in obj for obj in object_instances):
+                required.append(key)
+
+        result: dict[str, object] = {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        }
+        return result
     return {"type": "string"}

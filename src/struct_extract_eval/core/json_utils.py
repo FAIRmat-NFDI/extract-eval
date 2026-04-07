@@ -69,6 +69,7 @@ def get_children(
         child_path = f"{path}[]" if path else "[]"
         # "[]" is a special field name for array items, to distinguish
         # from object properties named "items"
+        # do not add . between path and [] like child_path = f"{path}.[]" if path else "[]" to distinguish field name called "[]"
         children.append(("[]", items, child_path))
 
     return children
@@ -76,7 +77,7 @@ def get_children(
 
 def walk_schema(
     schema: dict[str, object],
-    visit: Callable[[dict[str, object], str], None],
+    visit: Callable[[dict[str, object], str], None],  # todo: rename visit to apply or fn
     path: str = "",
 ) -> None:
     """Pre-order depth-first walk over a raw JSON Schema dict.
@@ -119,7 +120,7 @@ def get_node_at_path(
     for part in parts:
         if node is None:
             return None
-        if part == "[]":
+        if part == "[]": # if field name is "[]", the path will be "[].", which means the part will not be "[]", items will not be confused with a field name called "[]"
             items = node.get("items")
             node = items if isinstance(items, dict) else None
         else:
