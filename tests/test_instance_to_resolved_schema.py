@@ -207,10 +207,10 @@ class TestInferSchema:
         schema = infer_schema([{"flag": True}])
         assert schema["properties"]["flag"] == {"type": "boolean"}
 
-    def test_no_required_array_when_all_optional(self) -> None:
-        """When no field is present in all instances, no required array."""
+    def test_empty_required_array_when_all_optional(self) -> None:
+        """When no field is present in all instances, required should be empty."""
         schema = infer_schema([
             {"a": 1},
             {"b": 2},
         ])
-        assert "required" not in schema
+        assert schema["required"] == []

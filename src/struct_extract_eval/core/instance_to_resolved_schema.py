@@ -84,8 +84,10 @@ def infer_schema(instances: list[object]) -> dict[str, object]:
             if all(key in obj for obj in object_instances):
                 required.append(key)
 
-        result: dict[str, object] = {"type": "object", "properties": properties}
-        if required:
-            result["required"] = required
+        result: dict[str, object] = {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        }
         return result
     return {"type": "string"}

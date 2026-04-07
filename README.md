@@ -31,9 +31,11 @@ evaluation config.
 pipeline; this package evaluates the result.
 
 **The schema input is a simplified "resolved" schema** -- only `type`, `properties`, `items`, and `required`.
-Composition (`$ref`, `allOf`, `anyOf`, `oneOf`), conditionals (`if`/`then`/`else`), and constraints are not supported.
-If your original schema uses these, resolve them yourself before passing it in. By the time data reaches this package,
-the only question is: what fields exist and what type are they.
+`x-eval-*` extension keys may also be present for evaluation configuration, and `infer_schema()` may add
+`{"x-eval-compare": "skip"}` for all-null leaves. Composition (`$ref`, `allOf`, `anyOf`, `oneOf`), conditionals
+(`if`/`then`/`else`), and constraints are not supported. If your original schema uses these, resolve them yourself
+before passing it in. By the time data reaches this package, the only question is: what fields exist and what type are
+they.
 
 ## Installation
 
@@ -156,7 +158,7 @@ with open("eval_schema.json", "w") as f:
     json.dump(eval_schema, f, indent=2)
 ```
 
-This produces a eval schema with defaults:
+This produces an eval schema with defaults:
 
 ```json
 {
@@ -300,8 +302,10 @@ recall.
 
 - **`null` is a value, not absence.** A key present with value `null` is different from a missing key. `null` vs
   `"alice"` is a mismatch (score 0). `null` vs `null` is a match (score 1).
-- **`x-eval-required` is not inherited.** An optional parent does not make its children optional. Two cases:
-  - **Optional parent is missing from extracted:** 0 fields counted. Children are never reached, no penalty.
+- **`x-eval-required` is not inherited.** An optional parent does not make its children optional, and children's
+  `required` flags do not leak upward. Three cases:
+  - **Optional parent is missing from extracted:** 0 fields counted. Children are never reached, so there is no
+    penalty, regardless of how many leaves the parent has or whether those leaves are individually required.
   - **Required parent is missing from extracted:** every leaf descendant becomes an omission.
   - **Parent is present:** children are evaluated normally using their own `x-eval-required` flags.
 - **Fields with `skip` comparator** always score 1.0 and are excluded from precision, recall, F1, and `total_fields`.
@@ -449,7 +453,7 @@ All evaluation config lives in the JSON schema. No separate config file.
 | `x-eval-required`           | Penalize absence?                                                   | `true`             | `false`                                                   |
 | `x-eval-compare`            | Which comparator to use                                             | inferred from type | `"semantic"`, `{"numeric": {"tolerance": {"rel": 0.01}}}` |
 | `x-eval-transform`          | Preprocessing chain (both sides)                                    | none               | `["lowercase", "strip"]`                                  |
-| `x-eval-allow-extra-fields` | at root level, role is similar to json schema `addtionalProperties` | false              | true                                                      |
+| `x-eval-allow-extra-fields` | at root level, role is similar to json schema `additionalProperties` | false              | true                                                      |
 
 ### Config Syntax
 
@@ -527,7 +531,7 @@ with.
 | **Instance**                                | A JSON object with actual data values. Both gold (ground truth) and extracted (LLM output) are instances.                                                                                                                                                                                                                                                                                             |
 | [**JSON Schema**](https://json-schema.org/) | A standard JSON Schema (`type`, `properties`, `required`, etc.) with no eval-specific extensions.                                                                                                                                                                                                                                                                                                     |
 | **Resolved schema**                         | A schema containing only `type`, `properties`, `items`, and `required`. No composition or conditional keywords (`$ref`, `allOf`, `anyOf`, `oneOf`, `if/then/else`). No constraint keywords (`minLength`, `format`, etc.). No `x-eval-*`. This is the clean structural input the package accepts.                                                                                                      |
-| **Eval schema**                             | A resolved schema annotated with `x-eval-*` extension keys. Contains only `type`, `properties`, `items`, `x-eval-required` (only annotated when `false`; `true` is default), `x-eval-compare`, and `x-eval-transform`. Produced by running `add_default_xeval()` on a resolved schema. Single source of truth for evaluation config. |
+| **Eval schema**                             | A resolved schema annotated with `x-eval-*` extension keys. Contains only `type`, `properties`, `items`, `x-eval-required` (only annotated when `false`; `true` is default), `x-eval-compare`, and `x-eval-transform`. Produced by running `add_default_xeval()` on a resolved schema. Canonical source of truth for evaluation structure and config. |
 | **SchemaNode tree**                         | Internal parsed representation of an eval schema. All downstream code works with `SchemaNode`, never raw dicts.                                                                                                                                                                                                                                                                                       |
 
 ---
