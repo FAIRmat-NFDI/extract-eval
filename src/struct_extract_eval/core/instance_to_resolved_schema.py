@@ -10,7 +10,7 @@ def infer_schema(instances: list[object]) -> dict[str, object]:
     the parent object. Fields absent in any instance are omitted from
     ``required`` (meaning they are optional).
 
-    All-null fields default to ``{"type": "string", "x-eval-compare": "skip"}``.
+    All-null fields default to ``{"type": "string"}``.
 
     Raises ``ValueError`` if *instances* is empty.
     """
@@ -19,7 +19,7 @@ def infer_schema(instances: list[object]) -> dict[str, object]:
 
     present_instances = [instance for instance in instances if instance is not None]
     if not present_instances:
-        return {"type": "string", "x-eval-compare": "skip"}
+        return {"type": "string"}
 
     first = present_instances[0]  # first instance used to decide the instance type
     if isinstance(first, bool):

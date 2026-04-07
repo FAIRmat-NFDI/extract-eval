@@ -30,12 +30,10 @@ evaluation config.
 `format`, `enum`, etc.). It uses the schema only for structure and eval config. Validation belongs to your extraction
 pipeline; this package evaluates the result.
 
-**The schema input is a simplified "resolved" schema** -- only `type`, `properties`, `items`, and `required`.
-`x-eval-*` extension keys may also be present for evaluation configuration, and `infer_schema()` may add
-`{"x-eval-compare": "skip"}` for all-null leaves. Composition (`$ref`, `allOf`, `anyOf`, `oneOf`), conditionals
-(`if`/`then`/`else`), and constraints are not supported. If your original schema uses these, resolve them yourself
-before passing it in. By the time data reaches this package, the only question is: what fields exist and what type are
-they.
+**The schema input is a simplified "resolved" schema** -- only `type`, `properties`, `items`, and `required`. No
+`x-eval-*` keys, no composition (`$ref`, `allOf`, `anyOf`, `oneOf`), no conditionals (`if`/`then`/`else`), no
+constraints. If your original schema uses these, resolve them yourself before passing it in. By the time data reaches
+this package, the only question is: what fields exist and what type are they.
 
 ## Installation
 

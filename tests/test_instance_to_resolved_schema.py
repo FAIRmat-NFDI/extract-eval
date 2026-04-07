@@ -37,7 +37,7 @@ class TestInferSchema:
 
     def test_all_null_field(self) -> None:
         schema = infer_schema([{"x": None}, {"x": None}])
-        assert schema["properties"]["x"] == {"type": "string", "x-eval-compare": "skip"}
+        assert schema["properties"]["x"] == {"type": "string"}
 
     def test_nested_object(self) -> None:
         schema = infer_schema([{"outer": {"inner": "val"}}])
