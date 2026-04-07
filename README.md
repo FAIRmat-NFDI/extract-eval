@@ -21,8 +21,7 @@ Walk the schema, compare each field with the right tool for its type, and aggreg
 - **Precision / recall / F1** -- precision penalizes hallucinated fields, recall penalizes omissions. Per-record and
   per-field aggregation show exactly where the extractor fails.
 
-All configuration lives in the schema itself, as `x-eval-*` extension keys: one file, no drift between validation and
-evaluation config.
+All configuration lives in the schema itself, as `x-eval-*` extension keys: one file, no drift.
 
 ## Scope
 
@@ -514,11 +513,11 @@ with.
 |------------------------------------------------|------------------------------------------------------------------|
 | `infer_schema(instances)`                      | Infer resolved schema from gold instances                        |
 | `add_default_xeval(schema)`                    | Annotate a resolved schema with `x-eval-*` defaults (in-place)   |
-| `generate_eval_schema(golds)`                  | Generate eval schema (resolved + `x-eval-*` defaults) for review |
+| `generate_eval_schema(gold?, schema?)`          | Generate eval schema (resolved + `x-eval-*` defaults) for review |
 | `evaluate(gold, extracted, schema, id_field?)` | Evaluate gold vs extracted using a reviewed eval schema          |
 | `parse_schema(schema)`                         | Parse an eval schema into the internal tree representation       |
 
-`evaluate()` requires resolved schema -- you must generate and review an eval schema before calling it.
+`evaluate()` requires an eval schema -- you must generate and review it before calling.
 
 ---
 
