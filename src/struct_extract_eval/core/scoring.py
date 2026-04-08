@@ -37,7 +37,10 @@ def score_record(
 ) -> list[FieldResult]:
     """Walk the SchemaNode tree, comparing gold and extracted at each field.
 
-    Returns a flat list of FieldResult, one per leaf field encountered.
+    Returns a flat list of FieldResult entries for scored leaf fields.
+    Fields marked ``x-eval-skip`` are also included with status
+    ``"skipped"`` for visibility, but are excluded from all metric
+    calculations.
     """
     return _score_node(schema, gold, extracted)
 
@@ -70,10 +73,25 @@ def _score_object(
     extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
 
     for child in node.children:
-        # Extract field name from path: "experiment.name" -> "name", "tags[]" -> skip
+        # Extract field name from path: "experiment.name" -> "name"
         field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
         if field_name == "[]":
             # Array items node -- handled by _score_array on the parent
+            continue
+
+        # Skip fields are included in results for visibility but excluded
+        # from all metric calculations (precision, recall, F1, total_fields).
+        if child.skip:
+            gold_val = gold_dict.get(field_name)
+            extracted_val = extracted_dict.get(field_name)
+            results.append(FieldResult(
+                path=child.path,
+                score=0.0,
+                comparator="",
+                gold_value=gold_val,
+                extracted_value=extracted_val,
+                status="skipped",
+            ))
             continue
 
         gold_has = field_name in gold_dict
@@ -82,11 +100,9 @@ def _score_object(
         if gold_has and extracted_has:
             results.extend(_score_node(child, gold_dict[field_name], extracted_dict[field_name]))
         elif gold_has and not extracted_has:
-            if child.required:
-                results.extend(_omission_results(child))
-            # If not required, skip -- no penalty
-        # extracted_has and not gold_has: ignored by scoring
-        # todo: what if not gold_has but extracted_has? hallucination? currently ignored, but maybe should be scored?
+            results.extend(_omission_results(child))
+        elif extracted_has and not gold_has:
+            results.extend(_hallucination_results(child, extracted_dict[field_name]))
 
     return results
 
@@ -128,15 +144,23 @@ def _score_leaf(
     extracted_value: object,
 ) -> list[FieldResult]:
     """Score a leaf node: apply transforms, then comparator."""
+    if node.skip:
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="skipped",
+        )]
+
     gold_transformed = _apply_transforms(gold_value, node.transform)
     extracted_transformed = _apply_transforms(extracted_value, node.transform)
 
     comparator_fn = get_comparator(node.comparator)
     result = comparator_fn(gold_transformed, extracted_transformed, node.comparator_params)
 
-    if node.comparator == "skip":
-        status = "skipped"
-    elif result.score >= 1.0:
+    if result.score == 1.0:
         status = "match"
     else:
         status = "mismatch"
@@ -172,6 +196,8 @@ def _omission_results(node: SchemaNode) -> list[FieldResult]:
     into all children so every leaf in the subtree is marked as an omission.
     For array nodes, returns empty -- a missing array has no elements to score.
     """
+    if node.skip:
+        return []
     if node.json_type == "object" and node.children:
         results: list[FieldResult] = []
         for child in node.children:
@@ -199,6 +225,8 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
     into all children so every leaf in the subtree is marked as a hallucination.
     For array nodes, returns empty.
     """
+    if node.skip:
+        return []
     if node.json_type == "object" and node.children:
         results: list[FieldResult] = []
         extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}

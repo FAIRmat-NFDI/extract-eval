@@ -73,7 +73,7 @@ class TestMissingFields:
         assert results[0].status == "omission"
         assert results[0].score == 0.0
 
-    def test_optional_field_missing_is_skipped(self) -> None:
+    def test_optional_field_in_gold_missing_in_extracted_is_omission(self) -> None:
         schema = _make_schema({
             "type": "object",
             "properties": {
@@ -82,18 +82,50 @@ class TestMissingFields:
             },
         })
         results = score_record(schema, {"name": "Alice", "email": "a@b.com"}, {"name": "Alice"})
-        # "email" is optional and missing in extracted -- not penalized
+        # "email" is in gold, so extractor is expected to produce it -- omission
+        assert len(results) == 2
+        by_path = {r.path: r for r in results}
+        assert by_path["name"].score == 1.0
+        assert by_path["email"].status == "omission"
+        assert by_path["email"].score == 0.0
+
+    def test_optional_field_missing_in_both_is_not_counted(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "email": {"type": "string", "x-eval-required": False},
+            },
+        })
+        results = score_record(schema, {"name": "Alice"}, {"name": "Alice"})
+        # "email" absent in both -- not counted
         assert len(results) == 1
         assert results[0].path == "name"
 
-    def test_extracted_has_extra_field_ignored(self) -> None:
+    def test_field_missing_in_gold_present_in_extracted_is_hallucination(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "email": {"type": "string", "x-eval-required": False},
+            },
+        })
+        results = score_record(schema, {"name": "Alice"}, {"name": "Alice", "email": "a@b.com"})
+        # "email" not in gold but in extracted -- hallucination
+        assert len(results) == 2
+        by_path = {r.path: r for r in results}
+        assert by_path["name"].score == 1.0
+        assert by_path["email"].status == "hallucination"
+        assert by_path["email"].score == 0.0
+
+    def test_extra_field_not_in_schema_ignored(self) -> None:
         schema = _make_schema({
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
             },
         })
-        # Gold doesn't have "extra", extracted does -- scoring ignores it
+        # "extra" is not in the schema at all -- invisible to the evaluator
         results = score_record(schema, {"name": "Alice"}, {"name": "Alice", "extra": "ignored"})
         assert len(results) == 1
         assert results[0].score == 1.0
@@ -344,3 +376,88 @@ class TestDeeplyNested:
         omissions = [r for r in results if r.status == "omission"]
         assert len(matched) == 2  # S1's id and value
         assert len(omissions) == 2  # S2's id and value
+
+
+# --- Skip fields ---
+
+
+class TestSkipFields:
+    def test_skip_field_included_in_results_as_skipped(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string", "x-eval-skip": True},
+            },
+        })
+        results = score_record(
+            schema,
+            {"name": "Alice", "description": "some text"},
+            {"name": "Alice", "description": "other text"},
+        )
+        # description is skip -- present in results for visibility, with status "skipped"
+        assert len(results) == 2
+        by_path = {r.path: r for r in results}
+        assert by_path["name"].status == "match"
+        assert by_path["description"].status == "skipped"
+        assert by_path["description"].gold_value == "some text"
+        assert by_path["description"].extracted_value == "other text"
+
+    def test_skip_field_missing_in_extracted_no_omission(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string", "x-eval-skip": True},
+            },
+        })
+        results = score_record(
+            schema,
+            {"name": "Alice", "description": "some text"},
+            {"name": "Alice"},
+        )
+        # description is skip -- still "skipped", not "omission"
+        assert len(results) == 2
+        by_path = {r.path: r for r in results}
+        assert by_path["name"].status == "match"
+        assert by_path["description"].status == "skipped"
+
+    def test_skip_field_missing_in_gold_no_hallucination(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string", "x-eval-skip": True},
+            },
+        })
+        results = score_record(
+            schema,
+            {"name": "Alice"},
+            {"name": "Alice", "description": "extra text"},
+        )
+        # description is skip -- still "skipped", not "hallucination"
+        assert len(results) == 2
+        by_path = {r.path: r for r in results}
+        assert by_path["name"].status == "match"
+        assert by_path["description"].status == "skipped"
+
+    def test_skip_excluded_from_metrics(self) -> None:
+        # x-eval-required: true (default) + x-eval-skip: true
+        # skip fields appear in results but don't affect precision/recall/F1
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string", "x-eval-skip": True},
+            },
+        })
+        results = score_record(
+            schema,
+            {"name": "Alice", "description": "text"},
+            {"name": "Alice"},
+        )
+        assert len(results) == 2
+        # Only "name" should contribute to metrics
+        scored = [r for r in results if r.status != "skipped"]
+        assert len(scored) == 1
+        assert scored[0].path == "name"

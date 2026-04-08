@@ -81,7 +81,8 @@ class TestAddDefaultXeval:
         add_default_xeval(schema)
         assert schema["properties"]["description"]["x-eval-compare"] == "exact"  # type: ignore[index]
 
-    def test_object_no_properties_gets_skip(self) -> None:
+    def test_object_no_properties_gets_exact(self) -> None:
+        # Opaque objects (no properties) are leaves and get "exact" by default
         schema: dict[str, object] = {
             "type": "object",
             "properties": {
@@ -89,7 +90,7 @@ class TestAddDefaultXeval:
             },
         }
         add_default_xeval(schema)
-        assert schema["properties"]["metadata"]["x-eval-compare"] == "skip"  # type: ignore[index]
+        assert schema["properties"]["metadata"]["x-eval-compare"] == "exact"  # type: ignore[index]
 
     def test_explicit_compare_not_overridden(self) -> None:
         schema: dict[str, object] = {

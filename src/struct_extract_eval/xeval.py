@@ -1,8 +1,8 @@
 """x-eval-* utilities.
 
 ``add_default_xeval`` annotates a resolved schema in-place with sensible
-``x-eval-*`` defaults so that downstream consumers always
-have explicit ``x-eval-compare`` on every leaf field.
+``x-eval-*`` defaults. Leaf fields without an existing ``x-eval-compare``
+or ``x-eval-skip`` get an explicit ``x-eval-compare`` inferred from type.
 ``x-eval-required`` is only annotated when ``false``; the default is ``true``.
 
 ``parse_xeval_entry`` is the shared parser for the two-shape rule used
@@ -54,9 +54,7 @@ def _default_comparator(schema: dict[str, object]) -> str:
     if json_type == "string":
         return "exact"
     if json_type == "object":
-        return "skip"
-    # Fallback for unknown types
-    # todo: add semantic ??
+        return "exact"
     return "exact"
 
 
@@ -64,7 +62,8 @@ def add_default_xeval(schema: dict[str, object]) -> dict[str, object]:
     """Annotate a resolved schema in-place with ``x-eval-*`` defaults.
 
     Walks the schema tree. For each leaf node without an explicit
-    ``x-eval-compare``, infers the comparator from the node's type.
+    ``x-eval-compare`` or ``x-eval-skip``, infers the comparator from
+    the node's type.
     For each property of an object, infers ``x-eval-required`` from
     the parent's ``required`` array (explicit ``x-eval-required`` is
     never overridden). The ``required`` array is then removed -- the
@@ -80,7 +79,7 @@ def add_default_xeval(schema: dict[str, object]) -> dict[str, object]:
 def _annotate_node(schema: dict[str, object]) -> None:
     """Recursively annotate a single schema node."""
     if is_leaf(schema):
-        if "x-eval-compare" not in schema:
+        if "x-eval-compare" not in schema and "x-eval-skip" not in schema:
             schema["x-eval-compare"] = _default_comparator(schema)
         return
 

@@ -57,10 +57,12 @@ def build_record_result(
 ) -> RecordResult:
     """Compute precision, recall, F1 from field results.
 
-    Counting logic (skipped fields excluded from all counts):
+    Counting logic (skipped fields are present in results for visibility
+    but excluded from all metric calculations):
     - match/mismatch: contributes to both precision and recall denominators
     - omission (FN): contributes to recall denominator only
     - hallucination (FP): contributes to precision denominator only
+    - skipped: excluded from all counts
     """
     precision_num = 0.0
     precision_den = 0.0

@@ -18,7 +18,7 @@ def _clean_registry() -> None:
 
 
 def test_builtins_registered() -> None:
-    for name in ("exact", "numeric", "oneof", "semantic", "skip"):
+    for name in ("exact", "numeric", "oneof", "semantic"):
         fn = get_comparator(name)
         assert callable(fn)
 

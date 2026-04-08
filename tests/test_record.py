@@ -52,13 +52,13 @@ class TestBuildRecordResult:
         assert r.recall == 1.0
         assert r.f1 > 0.0
 
-    def test_skipped_excluded_from_counts(self) -> None:
+    def test_skipped_excluded_from_metrics(self) -> None:
+        # Skipped fields are present in results but excluded from all counts
         fields = [
             FieldResult("name", 1.0, "exact", "Alice", "Alice", "match"),
-            FieldResult("comment", 1.0, "skip", "blah", "blah", "skipped"),
+            FieldResult("comment", 0.0, "", "blah", "blah", "skipped"),
         ]
         r = build_record_result(0, fields, {}, {})
-        # skipped field should not affect precision/recall
         assert r.precision == 1.0
         assert r.recall == 1.0
         assert r.f1 == 1.0
@@ -84,9 +84,10 @@ class TestBuildRecordResult:
             FieldResult("b", 0.0, "exact", "y", "z", "mismatch"),
             FieldResult("c", 0.0, "exact", "w", None, "omission"),
             FieldResult("d", 0.0, "exact", None, "ghost", "hallucination"),
-            FieldResult("e", 1.0, "skip", "free", "text", "skipped"),
+            FieldResult("e", 0.0, "", "free", "text", "skipped"),
         ]
         r = build_record_result(0, fields, {}, {})
+        # skipped field (e) excluded from all calculations
         # precision denominator: match(a) + mismatch(b) + hallucination(d) = 3
         # precision numerator: score(a)=1 + score(b)=0 + score(d)=0 = 1
         # precision = 1/3
@@ -161,9 +162,10 @@ class TestBuildRunResult:
         assert run.total_records == 0
         assert run.per_field == {}
 
-    def test_skipped_excluded_from_field_counts(self) -> None:
+    def test_skipped_excluded_from_run_counts(self) -> None:
+        # Skipped fields are in results but excluded from total_fields and per_field
         r1 = self._make_record(0, [
-            FieldResult("comment", 1.0, "skip", "a", "b", "skipped"),
+            FieldResult("comment", 0.0, "", "a", "b", "skipped"),
         ])
         run = build_run_result([r1])
         assert "comment" not in run.per_field

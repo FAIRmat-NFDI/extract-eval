@@ -14,8 +14,9 @@ equivalent, all fail string equality. Worse, a single overall score tells you no
 Walk the schema, compare each field with the right tool for its type, and aggregate:
 
 - **Per-field comparators** -- `exact` for IDs and enums, `numeric` with tolerance for floats, `oneof` for known
-  synonyms, `semantic` for free text via an LLM judge, `skip` for fields with no correct answer. Custom comparators can
-  be registered.
+  synonyms, `semantic` for free text via an LLM judge. Custom comparators can be registered.
+- **Skip** -- `x-eval-skip: true` makes a field fully invisible to scoring. No value comparison, no presence check, no
+  contribution to any metric.
 - **Transforms** -- chain preprocessing steps (`lowercase`, `strip`, `round_digits`, ...) before comparison.
 - **Structural alignment** -- match objects by key name, arrays by position (key-field and Hungarian matching planned).
 - **Precision / recall / F1** -- precision penalizes hallucinated fields, recall penalizes omissions. Per-record and
@@ -189,7 +190,7 @@ exact rules):
 | `string`                 | `exact`            |
 | `number` / `integer`     | `numeric`          |
 | `boolean`                | `exact`            |
-| `object` (no properties) | `skip`             |
+| `object` (no properties) | `exact`            |
 
 ### Step 3: Customize the Eval Schema
 
@@ -268,44 +269,64 @@ for path, agg in result.per_field.items():
 The evaluator walks the schema tree (not the data). Only **leaf fields** (strings, numbers, booleans) are scored --
 container nodes (objects, arrays) are structural scaffolding. For each leaf, it checks presence in gold and extracted:
 
-| Gold has field? | Extracted has field? | What happens                                                                                |
-|-----------------|----------------------|---------------------------------------------------------------------------------------------|
-| Yes             | Yes                  | Compare using the field's comparator                                                        |
-| Yes             | No                   | If `x-eval-required: true` (default): **omission** (score 0). If `false`: skipped entirely. |
-| No              | Yes                  | Ignored -- no gold to compare against                                                       |
-| No              | No                   | Not counted                                                                                 |
+| Gold has field? | Extracted has field? | What happens                                        |
+|-----------------|----------------------|-----------------------------------------------------|
+| Yes             | Yes                  | Compare using the field's comparator                 |
+| Yes             | No                   | **Omission** -- penalizes recall                     |
+| No              | Yes                  | **Hallucination** -- penalizes precision              |
+| No              | No                   | Nothing -- the field does not exist for this record  |
 
 **Example:** Given this schema and data:
 
 ```
-Schema fields: method (string, exact), temperature (number, numeric), lab_id (string, optional)
+Schema fields: method (string, exact), temperature (number, numeric), lab_id (string, x-eval-required: false)
 
 Gold:      {"method": "PVD", "temperature": 300, "lab_id": "A1"}
 Extracted: {"method": "PVD", "temperature": 305}
 ```
 
-| Field         | Gold    | Extracted   | Status               | Score      |
-|---------------|---------|-------------|----------------------|------------|
-| `method`      | `"PVD"` | `"PVD"`     | match                | 1.0        |
-| `temperature` | `300`   | `305`       | depends on tolerance | 0.0 or 1.0 |
-| `lab_id`      | `"A1"`  | *(missing)* | skipped (optional)   | --         |
+| Field         | Gold    | Extracted   | Status               | Score |
+|---------------|---------|-------------|----------------------|-------|
+| `method`      | `"PVD"` | `"PVD"`     | match                | 1.0   |
+| `temperature` | `300`   | `305`       | depends on tolerance | 0 / 1 |
+| `lab_id`      | `"A1"`  | *(missing)* | omission             | 0.0   |
 
-Result: 2 fields scored. `lab_id` is not penalized because it is optional.
-
-If `lab_id` were required (the default), it would be an **omission**: 3 fields scored, `lab_id` gets score 0, hurting
-recall.
+Result: 3 fields scored. `lab_id` is in gold, so the extractor is expected to produce it -- its `x-eval-required: false`
+flag does not matter for scoring.
 
 **Key details:**
 
+- **`x-eval-required` is a constraint on gold, not on scoring.** The flag tells you whether it is acceptable for gold
+  to omit a field. `x-eval-required: true` (the default) means gold MUST have this field -- if gold is missing it,
+  that's a data quality error. `x-eval-required: false` means gold MAY be missing this field -- it is structurally
+  absent in some records, and that's fine. Once a field is present in gold, the extractor is expected to produce it.
+  Once a field is absent in gold, the extractor is expected to not produce it. The scoring path does not branch on
+  `x-eval-required` at all -- it simply compares whatever gold has against whatever extracted has. The only place
+  `x-eval-required` matters is gold validation, before scoring begins: an `x-eval-required: true` field missing from
+  gold is flagged as a data quality error; an `x-eval-required: false` field missing from gold is silently accepted.
 - **`null` is a value, not absence.** A key present with value `null` is different from a missing key. `null` vs
   `"alice"` is a mismatch (score 0). `null` vs `null` is a match (score 1).
-- **`x-eval-required` is not inherited.** An optional parent does not make its children optional, and children's
-  `required` flags do not leak upward. Three cases:
-  - **Optional parent is missing from extracted:** 0 fields counted. Children are never reached, so there is no
-    penalty, regardless of how many leaves the parent has or whether those leaves are individually required.
-  - **Required parent is missing from extracted:** every leaf descendant becomes an omission.
-  - **Parent is present:** children are evaluated normally using their own `x-eval-required` flags.
-- **Fields with `skip` comparator** always score 1.0 and are excluded from precision, recall, F1, and `total_fields`.
+- **`x-eval-required` is not inherited.** A parent's `x-eval-required` does not affect its children, and children's
+  flags do not leak upward. Three cases:
+  - **Parent absent in both gold and extracted:** 0 fields counted. Children are never reached.
+  - **Parent in gold, missing from extracted:** every leaf descendant becomes an omission.
+  - **Parent present in both:** children are evaluated normally using their own `x-eval-required` flags for gold
+    validation only -- scoring depends on what gold contains.
+- **`x-eval-skip: true` means excluded from metrics.** The field is excluded from all metric calculations -- no value
+  comparison, no presence check, no contribution to precision, recall, F1, or `total_fields`. Skip fields still appear
+  in the results (with status `"skipped"`) for visibility and debugging, but they are filtered out when calculating
+  scores. If you want presence checking, don't mark it skip -- use a real comparator.
+  `x-eval-skip` is orthogonal to both `x-eval-compare` and `x-eval-required`:
+  - **`required: true` + `skip: true`** -- gold MUST have this field (`validate_gold()` checks), but scoring ignores it.
+    Useful for fields like "description" that every record should have, but whose value can't be judged.
+  - **`required: false` + `skip: true`** -- gold MAY omit this field, and scoring ignores it either way.
+  - A field can declare both `x-eval-skip: true` and `x-eval-compare: "semantic"` -- the comparator documents what kind
+    of field it is. Toggling skip on/off doesn't lose the comparator config. When skip is `true`, the comparator is
+    ignored.
+  - **Presence-only checking:** if you want to score whether a field is present or missing, but don't care about its
+    value (e.g., a "description" field the extractor should always produce, but whose content doesn't matter), don't use
+    skip. Instead, use a custom comparator that always returns score 1.0. The field will participate in scoring normally
+    -- omission if missing, hallucination if extra -- but any value is accepted when both sides are present.
 - **Only schema-defined fields are evaluated.** Extra fields in the data that don't appear in the schema are invisible to
   the evaluator -- no penalty, no hallucination. See [#26](https://github.com/FAIRmat-NFDI/extract-eval/issues/26) for
   planned `additionalProperties` support.
@@ -334,7 +355,6 @@ Each record gets precision, recall, and F1 computed from its field results:
 | `numeric`  | Numbers                               | 0 or 1. Within tolerance = 1, outside = 0. Configure `rel` and/or `abs` tolerance. Without tolerance, defaults to exact float equality.                                                                          |
 | `semantic` | Strings where synonyms are valid      | 0 or 1. Short-circuits on exact string match. Otherwise defers to LLM judge (not yet implemented -- currently scores 0 for non-exact matches).                                                                    |
 | `oneof`    | Fields with known acceptable synonyms | 1 if extracted matches any value in list, 0 otherwise. Config: `{"oneof": {"values": ["PVD", "Sputtering"]}}`                                                                                                    |
-| `skip`     | any field does not need to compare    | Always 1. Not counted as a scored field -- excluded from precision, recall, F1, and `total_fields`.                                                                                                              |
 
 ### Custom Comparators
 
@@ -447,8 +467,9 @@ All evaluation config lives in the JSON schema. No separate config file.
 
 | Key                         | Purpose                                                             | Default            | Example                                                   |
 |-----------------------------|---------------------------------------------------------------------|--------------------|-----------------------------------------------------------|
-| `x-eval-required`           | Penalize absence?                                                   | `true`             | `false`                                                   |
+| `x-eval-required`           | Gold validation: is it OK for gold to omit this field?              | `true`             | `false`                                                   |
 | `x-eval-compare`            | Which comparator to use                                             | inferred from type | `"semantic"`, `{"numeric": {"tolerance": {"rel": 0.01}}}` |
+| `x-eval-skip`              | Make field fully invisible to scoring                               | `false`            | `true`                                                    |
 | `x-eval-transform`          | Preprocessing chain (both sides)                                    | none               | `["lowercase", "strip"]`                                  |
 | `x-eval-allow-extra-fields` | at root level, role is similar to json schema `additionalProperties` | false              | true                                                      |
 
@@ -487,7 +508,7 @@ scalar.
 | `mean_recall`          | `float`                       | Mean across records                   |
 | `mean_f1`              | `float`                       | Mean across records                   |
 | `total_records`        | `int`                         | Number of json record evaluated       |
-| `total_fields`         | `int`                         | Total scored fields (excludes `skip`) |
+| `total_fields`         | `int`                         | Total scored fields (excludes `x-eval-skip`) |
 | `total_omissions`      | `int`                         | Fields missing from extracted         |
 | `total_hallucinations` | `int`                         | Extra elements in extracted           |
 | `per_field`            | `dict[str, FieldAggregation]` | Per-field-path breakdown              |
