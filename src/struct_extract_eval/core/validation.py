@@ -46,7 +46,15 @@ def validate_gold(
                     record_id=i,
                     path=id_field,
                 )
-            record_id: str | int = g[id_field]  # type: ignore[assignment]
+            raw_id = g[id_field]
+            if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)):
+                raise GoldValidationError(
+                    f"Record {i!r}: id field '{id_field}' must be a string or "
+                    f"integer, got {type(raw_id).__name__}",
+                    record_id=i,
+                    path=id_field,
+                )
+            record_id: str | int = raw_id
         else:
             record_id = i
         _validate_node(tree, g, record_id)

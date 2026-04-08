@@ -1,7 +1,8 @@
 """x-eval-* utilities.
 
 ``add_default_xeval`` annotates a resolved schema in-place with sensible
-``x-eval-*`` defaults. Every leaf field gets an explicit ``x-eval-compare``.
+``x-eval-*`` defaults. Leaf fields without an existing ``x-eval-compare``
+or ``x-eval-skip`` get an explicit ``x-eval-compare`` inferred from type.
 ``x-eval-required`` is only annotated when ``false``; the default is ``true``.
 
 ``parse_xeval_entry`` is the shared parser for the two-shape rule used

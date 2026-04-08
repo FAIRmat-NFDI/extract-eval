@@ -165,6 +165,28 @@ class TestValidateGold:
             validate_gold([{"doi": "10.1234"}], schema, id_field="doi")
         assert exc_info.value.record_id == "10.1234"
 
+    def test_id_field_wrong_type_raises(self) -> None:
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "name": {"type": "string"},
+            },
+        })
+        with pytest.raises(GoldValidationError, match="string or integer"):
+            validate_gold([{"id": ["not", "valid"], "name": "Alice"}], schema, id_field="id")
+
+    def test_id_field_bool_raises(self) -> None:
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "name": {"type": "string"},
+            },
+        })
+        with pytest.raises(GoldValidationError, match="string or integer"):
+            validate_gold([{"id": True, "name": "Alice"}], schema, id_field="id")
+
     def test_missing_id_field_raises(self) -> None:
         schema = _eval_schema({
             "type": "object",

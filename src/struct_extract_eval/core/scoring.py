@@ -37,9 +37,10 @@ def score_record(
 ) -> list[FieldResult]:
     """Walk the SchemaNode tree, comparing gold and extracted at each field.
 
-    Returns a flat list of FieldResult, one per leaf field encountered.
-    Skip fields are included with status ``"skipped"`` for visibility,
-    but are excluded from all metric calculations.
+    Returns a flat list of FieldResult entries for scored leaf fields.
+    Fields marked ``x-eval-skip`` are also included with status
+    ``"skipped"`` for visibility, but are excluded from all metric
+    calculations.
     """
     return _score_node(schema, gold, extracted)
 
@@ -72,7 +73,7 @@ def _score_object(
     extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
 
     for child in node.children:
-        # Extract field name from path: "experiment.name" -> "name", "tags[]" -> skip
+        # Extract field name from path: "experiment.name" -> "name"
         field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
         if field_name == "[]":
             # Array items node -- handled by _score_array on the parent

@@ -190,7 +190,7 @@ exact rules):
 | `string`                 | `exact`            |
 | `number` / `integer`     | `numeric`          |
 | `boolean`                | `exact`            |
-| `object` (no properties) | `x-eval-skip: true` |
+| `object` (no properties) | `exact`            |
 
 ### Step 3: Customize the Eval Schema
 
