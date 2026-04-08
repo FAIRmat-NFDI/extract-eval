@@ -55,7 +55,7 @@ class TestBuildRecordResult:
     def test_skipped_excluded_from_counts(self) -> None:
         fields = [
             FieldResult("name", 1.0, "exact", "Alice", "Alice", "match"),
-            FieldResult("comment", 1.0, "skip", "blah", "blah", "skipped"),
+            FieldResult("comment", 0.0, "", "blah", "blah", "skipped"),
         ]
         r = build_record_result(0, fields, {}, {})
         # skipped field should not affect precision/recall
@@ -84,7 +84,7 @@ class TestBuildRecordResult:
             FieldResult("b", 0.0, "exact", "y", "z", "mismatch"),
             FieldResult("c", 0.0, "exact", "w", None, "omission"),
             FieldResult("d", 0.0, "exact", None, "ghost", "hallucination"),
-            FieldResult("e", 1.0, "skip", "free", "text", "skipped"),
+            FieldResult("e", 0.0, "", "free", "text", "skipped"),
         ]
         r = build_record_result(0, fields, {}, {})
         # precision denominator: match(a) + mismatch(b) + hallucination(d) = 3
@@ -163,7 +163,7 @@ class TestBuildRunResult:
 
     def test_skipped_excluded_from_field_counts(self) -> None:
         r1 = self._make_record(0, [
-            FieldResult("comment", 1.0, "skip", "a", "b", "skipped"),
+            FieldResult("comment", 0.0, "", "a", "b", "skipped"),
         ])
         run = build_run_result([r1])
         assert "comment" not in run.per_field

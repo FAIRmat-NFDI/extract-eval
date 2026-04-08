@@ -30,6 +30,7 @@ _KNOWN_XEVAL_KEYS = frozenset(
         "x-eval-required",
         "x-eval-compare",
         "x-eval-transform",
+        "x-eval-skip",
     }
 )
 
@@ -52,6 +53,7 @@ class SchemaNode:
     comparator: str
     children: list["SchemaNode"] = field(default_factory=list)
     required: bool = True
+    skip: bool = False
     transform: list[str | dict[str, object]] | None = None
     comparator_params: dict[str, object] = field(default_factory=dict)
 
@@ -69,6 +71,9 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
 
     if "x-eval-required" in schema and not isinstance(schema["x-eval-required"], bool):
         raise SchemaError("x-eval-required must be a boolean", path)
+
+    if "x-eval-skip" in schema and not isinstance(schema["x-eval-skip"], bool):
+        raise SchemaError("x-eval-skip must be a boolean", path)
 
     if "x-eval-compare" in schema:
         raw_compare = schema["x-eval-compare"]
@@ -122,12 +127,14 @@ def _resolve_comparator(
 ) -> tuple[str, dict[str, object]]:
     """Extract comparator name and params from x-eval-compare.
 
-    Raises SchemaError if x-eval-compare is missing on a leaf node.
+    Raises SchemaError if x-eval-compare is missing on a non-skip leaf node.
     Non-leaf nodes without x-eval-compare get an empty placeholder
     since container nodes are scored via their children, not directly.
+    Skip nodes without x-eval-compare get an empty placeholder since
+    the comparator is never called.
     """
     if "x-eval-compare" not in schema:
-        if is_leaf(schema):
+        if is_leaf(schema) and not schema.get("x-eval-skip"):
             raise SchemaError(
                 "missing x-eval-compare -- run add_default_xeval first", path
             )
@@ -170,6 +177,8 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
         node.comparator_params = comparator_params
     if "x-eval-required" in schema:
         node.required = bool(schema["x-eval-required"])
+    if schema.get("x-eval-skip"):
+        node.skip = True
     return node
 
 

@@ -89,7 +89,8 @@ class TestAddDefaultXeval:
             },
         }
         add_default_xeval(schema)
-        assert schema["properties"]["metadata"]["x-eval-compare"] == "skip"  # type: ignore[index]
+        assert schema["properties"]["metadata"]["x-eval-skip"] is True  # type: ignore[index]
+        assert "x-eval-compare" not in schema["properties"]["metadata"]  # type: ignore[index]
 
     def test_explicit_compare_not_overridden(self) -> None:
         schema: dict[str, object] = {

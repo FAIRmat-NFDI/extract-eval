@@ -43,8 +43,11 @@ def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, ob
     )
 
 
-def _default_comparator(schema: dict[str, object]) -> str:
-    """Infer the default comparator from the schema node's type."""
+def _default_comparator(schema: dict[str, object]) -> str | None:
+    """Infer the default comparator from the schema node's type.
+
+    Returns None for types that should be skipped (e.g. opaque objects).
+    """
     json_type = resolve_type(schema)
 
     if json_type in ("number", "integer"):
@@ -54,7 +57,7 @@ def _default_comparator(schema: dict[str, object]) -> str:
     if json_type == "string":
         return "exact"
     if json_type == "object":
-        return "skip"
+        return None  # opaque objects get x-eval-skip: true
     # Fallback for unknown types
     # todo: add semantic ??
     return "exact"
@@ -80,8 +83,12 @@ def add_default_xeval(schema: dict[str, object]) -> dict[str, object]:
 def _annotate_node(schema: dict[str, object]) -> None:
     """Recursively annotate a single schema node."""
     if is_leaf(schema):
-        if "x-eval-compare" not in schema:
-            schema["x-eval-compare"] = _default_comparator(schema)
+        if "x-eval-compare" not in schema and "x-eval-skip" not in schema:
+            comparator = _default_comparator(schema)
+            if comparator is None:
+                schema["x-eval-skip"] = True
+            else:
+                schema["x-eval-compare"] = comparator
         return
 
     # Container node (object or array): set x-eval-required on children,

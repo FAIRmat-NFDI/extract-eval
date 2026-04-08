@@ -125,16 +125,24 @@ def _score_leaf(
     gold_value: object,
     extracted_value: object,
 ) -> list[FieldResult]:
-    """Score a leaf node: apply transforms, then comparator."""
+    """Score a leaf node: apply transforms, then comparator. Skip nodes bypass comparison."""
+    if node.skip:
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="skipped",
+        )]
+
     gold_transformed = _apply_transforms(gold_value, node.transform)
     extracted_transformed = _apply_transforms(extracted_value, node.transform)
 
     comparator_fn = get_comparator(node.comparator)
     result = comparator_fn(gold_transformed, extracted_transformed, node.comparator_params)
 
-    if node.comparator == "skip":
-        status = "skipped"
-    elif result.score >= 1.0:
+    if result.score >= 1.0:
         status = "match"
     else:
         status = "mismatch"
