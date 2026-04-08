@@ -73,7 +73,7 @@ class TestMissingFields:
         assert results[0].status == "omission"
         assert results[0].score == 0.0
 
-    def test_optional_field_missing_is_skipped(self) -> None:
+    def test_optional_field_in_gold_missing_in_extracted_is_omission(self) -> None:
         schema = _make_schema({
             "type": "object",
             "properties": {
@@ -82,18 +82,50 @@ class TestMissingFields:
             },
         })
         results = score_record(schema, {"name": "Alice", "email": "a@b.com"}, {"name": "Alice"})
-        # "email" is optional and missing in extracted -- not penalized
+        # "email" is in gold, so extractor is expected to produce it -- omission
+        assert len(results) == 2
+        by_path = {r.path: r for r in results}
+        assert by_path["name"].score == 1.0
+        assert by_path["email"].status == "omission"
+        assert by_path["email"].score == 0.0
+
+    def test_optional_field_missing_in_both_is_not_counted(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "email": {"type": "string", "x-eval-required": False},
+            },
+        })
+        results = score_record(schema, {"name": "Alice"}, {"name": "Alice"})
+        # "email" absent in both -- not counted
         assert len(results) == 1
         assert results[0].path == "name"
 
-    def test_extracted_has_extra_field_ignored(self) -> None:
+    def test_field_missing_in_gold_present_in_extracted_is_hallucination(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "email": {"type": "string", "x-eval-required": False},
+            },
+        })
+        results = score_record(schema, {"name": "Alice"}, {"name": "Alice", "email": "a@b.com"})
+        # "email" not in gold but in extracted -- hallucination
+        assert len(results) == 2
+        by_path = {r.path: r for r in results}
+        assert by_path["name"].score == 1.0
+        assert by_path["email"].status == "hallucination"
+        assert by_path["email"].score == 0.0
+
+    def test_extra_field_not_in_schema_ignored(self) -> None:
         schema = _make_schema({
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
             },
         })
-        # Gold doesn't have "extra", extracted does -- scoring ignores it
+        # "extra" is not in the schema at all -- invisible to the evaluator
         results = score_record(schema, {"name": "Alice"}, {"name": "Alice", "extra": "ignored"})
         assert len(results) == 1
         assert results[0].score == 1.0

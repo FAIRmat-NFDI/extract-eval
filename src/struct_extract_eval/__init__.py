@@ -3,6 +3,7 @@
 from struct_extract_eval.core.instance_to_resolved_schema import infer_schema
 from struct_extract_eval.core.schema import SchemaNode, parse_schema
 from struct_extract_eval.core.scoring import FieldResult, score_record
+from struct_extract_eval.core.validation import GoldValidationError, validate_gold
 from struct_extract_eval.evaluator import evaluate, generate_eval_schema
 from struct_extract_eval.pipeline.record import (
     FieldAggregation,
@@ -17,6 +18,7 @@ __all__ = [
     "generate_eval_schema",
     "FieldAggregation",
     "FieldResult",
+    "GoldValidationError",
     "infer_schema",
     "parse_schema",
     "parse_xeval_entry",
@@ -24,4 +26,5 @@ __all__ = [
     "RunResult",
     "SchemaNode",
     "score_record",
+    "validate_gold",
 ]

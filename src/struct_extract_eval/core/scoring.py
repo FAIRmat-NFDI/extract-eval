@@ -82,11 +82,9 @@ def _score_object(
         if gold_has and extracted_has:
             results.extend(_score_node(child, gold_dict[field_name], extracted_dict[field_name]))
         elif gold_has and not extracted_has:
-            if child.required:
-                results.extend(_omission_results(child))
-            # If not required, skip -- no penalty
-        # extracted_has and not gold_has: ignored by scoring
-        # todo: what if not gold_has but extracted_has? hallucination? currently ignored, but maybe should be scored?
+            results.extend(_omission_results(child))
+        elif extracted_has and not gold_has:
+            results.extend(_hallucination_results(child, extracted_dict[field_name]))
 
     return results
 

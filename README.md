@@ -268,35 +268,41 @@ for path, agg in result.per_field.items():
 The evaluator walks the schema tree (not the data). Only **leaf fields** (strings, numbers, booleans) are scored --
 container nodes (objects, arrays) are structural scaffolding. For each leaf, it checks presence in gold and extracted:
 
-| Gold has field? | Extracted has field? | What happens                                                                                |
-|-----------------|----------------------|---------------------------------------------------------------------------------------------|
-| Yes             | Yes                  | Compare using the field's comparator                                                        |
-| Yes             | No                   | If `x-eval-required: true` (default): **omission** (score 0). If `false`: skipped entirely. |
-| No              | Yes                  | Ignored -- no gold to compare against                                                       |
-| No              | No                   | Not counted                                                                                 |
+| Gold has field? | Extracted has field? | What happens                                        |
+|-----------------|----------------------|-----------------------------------------------------|
+| Yes             | Yes                  | Compare using the field's comparator                 |
+| Yes             | No                   | **Omission** -- penalizes recall                     |
+| No              | Yes                  | **Hallucination** -- penalizes precision              |
+| No              | No                   | Nothing -- the field does not exist for this record  |
 
 **Example:** Given this schema and data:
 
 ```
-Schema fields: method (string, exact), temperature (number, numeric), lab_id (string, optional)
+Schema fields: method (string, exact), temperature (number, numeric), lab_id (string, x-eval-required: false)
 
 Gold:      {"method": "PVD", "temperature": 300, "lab_id": "A1"}
 Extracted: {"method": "PVD", "temperature": 305}
 ```
 
-| Field         | Gold    | Extracted   | Status               | Score      |
-|---------------|---------|-------------|----------------------|------------|
-| `method`      | `"PVD"` | `"PVD"`     | match                | 1.0        |
-| `temperature` | `300`   | `305`       | depends on tolerance | 0.0 or 1.0 |
-| `lab_id`      | `"A1"`  | *(missing)* | skipped (optional)   | --         |
+| Field         | Gold    | Extracted   | Status               | Score |
+|---------------|---------|-------------|----------------------|-------|
+| `method`      | `"PVD"` | `"PVD"`     | match                | 1.0   |
+| `temperature` | `300`   | `305`       | depends on tolerance | 0 / 1 |
+| `lab_id`      | `"A1"`  | *(missing)* | omission             | 0.0   |
 
-Result: 2 fields scored. `lab_id` is not penalized because it is optional.
-
-If `lab_id` were required (the default), it would be an **omission**: 3 fields scored, `lab_id` gets score 0, hurting
-recall.
+Result: 3 fields scored. `lab_id` is in gold, so the extractor is expected to produce it -- its `x-eval-required: false`
+flag does not matter for scoring.
 
 **Key details:**
 
+- **`x-eval-required` is a constraint on gold, not on scoring.** The flag tells you whether it is acceptable for gold
+  to omit a field. `required: true` (the default) means gold MUST have this field -- if gold is missing it, that's a
+  data quality error. `required: false` means gold MAY be missing this field -- it is structurally absent in some
+  records, and that's fine. Once a field is present in gold, the extractor is expected to produce it. Once a field is
+  absent in gold, the extractor is expected to not produce it. The scoring path does not branch on `required` at all --
+  it simply compares whatever gold has against whatever extracted has. The only place `required` matters is gold
+  validation, before scoring begins: a `required: true` field missing from gold is flagged as a data quality error; a
+  `required: false` field missing from gold is silently accepted.
 - **`null` is a value, not absence.** A key present with value `null` is different from a missing key. `null` vs
   `"alice"` is a mismatch (score 0). `null` vs `null` is a match (score 1).
 - **`x-eval-required` is not inherited.** An optional parent does not make its children optional, and children's
@@ -447,7 +453,7 @@ All evaluation config lives in the JSON schema. No separate config file.
 
 | Key                         | Purpose                                                             | Default            | Example                                                   |
 |-----------------------------|---------------------------------------------------------------------|--------------------|-----------------------------------------------------------|
-| `x-eval-required`           | Penalize absence?                                                   | `true`             | `false`                                                   |
+| `x-eval-required`           | Gold validation: is it OK for gold to omit this field?              | `true`             | `false`                                                   |
 | `x-eval-compare`            | Which comparator to use                                             | inferred from type | `"semantic"`, `{"numeric": {"tolerance": {"rel": 0.01}}}` |
 | `x-eval-transform`          | Preprocessing chain (both sides)                                    | none               | `["lowercase", "strip"]`                                  |
 | `x-eval-allow-extra-fields` | at root level, role is similar to json schema `additionalProperties` | false              | true                                                      |
