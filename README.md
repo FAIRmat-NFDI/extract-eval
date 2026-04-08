@@ -14,8 +14,9 @@ equivalent, all fail string equality. Worse, a single overall score tells you no
 Walk the schema, compare each field with the right tool for its type, and aggregate:
 
 - **Per-field comparators** -- `exact` for IDs and enums, `numeric` with tolerance for floats, `oneof` for known
-  synonyms, `semantic` for free text via an LLM judge, `skip` for fields with no correct answer. Custom comparators can
-  be registered.
+  synonyms, `semantic` for free text via an LLM judge. Custom comparators can be registered.
+- **Skip** -- `x-eval-skip: true` opts a field out of value comparison entirely. Presence/absence is still scored based
+  on what's in gold.
 - **Transforms** -- chain preprocessing steps (`lowercase`, `strip`, `round_digits`, ...) before comparison.
 - **Structural alignment** -- match objects by key name, arrays by position (key-field and Hungarian matching planned).
 - **Precision / recall / F1** -- precision penalizes hallucinated fields, recall penalizes omissions. Per-record and
@@ -189,7 +190,7 @@ exact rules):
 | `string`                 | `exact`            |
 | `number` / `integer`     | `numeric`          |
 | `boolean`                | `exact`            |
-| `object` (no properties) | `skip`             |
+| `object` (no properties) | `x-eval-skip: true` |
 
 ### Step 3: Customize the Eval Schema
 
@@ -311,7 +312,7 @@ flag does not matter for scoring.
     penalty, regardless of how many leaves the parent has or whether those leaves are individually required.
   - **Required parent is missing from extracted:** every leaf descendant becomes an omission.
   - **Parent is present:** children are evaluated normally using their own `x-eval-required` flags.
-- **Fields with `skip` comparator** always score 1.0 and are excluded from precision, recall, F1, and `total_fields`.
+- **Fields with `x-eval-skip: true`** are excluded from value comparison and do not affect precision, recall, F1, or `total_fields`. Presence/absence is still scored based on what's in gold.
 - **Only schema-defined fields are evaluated.** Extra fields in the data that don't appear in the schema are invisible to
   the evaluator -- no penalty, no hallucination. See [#26](https://github.com/FAIRmat-NFDI/extract-eval/issues/26) for
   planned `additionalProperties` support.
@@ -340,7 +341,6 @@ Each record gets precision, recall, and F1 computed from its field results:
 | `numeric`  | Numbers                               | 0 or 1. Within tolerance = 1, outside = 0. Configure `rel` and/or `abs` tolerance. Without tolerance, defaults to exact float equality.                                                                          |
 | `semantic` | Strings where synonyms are valid      | 0 or 1. Short-circuits on exact string match. Otherwise defers to LLM judge (not yet implemented -- currently scores 0 for non-exact matches).                                                                    |
 | `oneof`    | Fields with known acceptable synonyms | 1 if extracted matches any value in list, 0 otherwise. Config: `{"oneof": {"values": ["PVD", "Sputtering"]}}`                                                                                                    |
-| `skip`     | any field does not need to compare    | Always 1. Not counted as a scored field -- excluded from precision, recall, F1, and `total_fields`.                                                                                                              |
 
 ### Custom Comparators
 
@@ -455,6 +455,7 @@ All evaluation config lives in the JSON schema. No separate config file.
 |-----------------------------|---------------------------------------------------------------------|--------------------|-----------------------------------------------------------|
 | `x-eval-required`           | Gold validation: is it OK for gold to omit this field?              | `true`             | `false`                                                   |
 | `x-eval-compare`            | Which comparator to use                                             | inferred from type | `"semantic"`, `{"numeric": {"tolerance": {"rel": 0.01}}}` |
+| `x-eval-skip`              | Opt field out of value comparison                                   | `false`            | `true`                                                    |
 | `x-eval-transform`          | Preprocessing chain (both sides)                                    | none               | `["lowercase", "strip"]`                                  |
 | `x-eval-allow-extra-fields` | at root level, role is similar to json schema `additionalProperties` | false              | true                                                      |
 
@@ -493,7 +494,7 @@ scalar.
 | `mean_recall`          | `float`                       | Mean across records                   |
 | `mean_f1`              | `float`                       | Mean across records                   |
 | `total_records`        | `int`                         | Number of json record evaluated       |
-| `total_fields`         | `int`                         | Total scored fields (excludes `skip`) |
+| `total_fields`         | `int`                         | Total scored fields (excludes `x-eval-skip`) |
 | `total_omissions`      | `int`                         | Fields missing from extracted         |
 | `total_hallucinations` | `int`                         | Extra elements in extracted           |
 | `per_field`            | `dict[str, FieldAggregation]` | Per-field-path breakdown              |
