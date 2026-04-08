@@ -4,6 +4,7 @@ from struct_extract_eval.core.transforms.builtins import (
     transform_round_digits,
     transform_sort_tokens,
     transform_strip,
+    transform_type_convert,
 )
 from struct_extract_eval.core.transforms.transform import Transform
 
@@ -18,6 +19,7 @@ _BUILTIN_TRANSFORMS: dict[str, Transform] = {
     "round_digits": transform_round_digits,
     "sort_tokens": transform_sort_tokens,
     "strip": transform_strip,
+    "type_convert": transform_type_convert,
 }
 
 _registry: dict[str, Transform] = {}

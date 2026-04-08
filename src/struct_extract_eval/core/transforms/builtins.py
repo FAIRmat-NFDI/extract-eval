@@ -46,3 +46,32 @@ def transform_round_digits(value: Any, params: dict[str, Any]) -> Any:
         raise TypeError("round_digits transform requires 'digits' parameter")
     digits = int(params["digits"])
     return round(value, digits)
+
+
+_TYPE_CONVERTERS: dict[str, type] = {
+    "float": float,
+    "int": int,
+    "str": str,
+    "bool": bool,
+}
+
+
+def transform_type_convert(value: Any, params: dict[str, Any]) -> Any:
+    """Convert value to the specified type.
+
+    Params: {"to": "float" | "int" | "str" | "bool"}
+    """
+    if "to" not in params:
+        raise TypeError("type_convert transform requires 'to' parameter")
+    target = params["to"]
+    if target not in _TYPE_CONVERTERS:
+        raise ValueError(
+            f"type_convert 'to' must be one of {sorted(_TYPE_CONVERTERS)}, got {target!r}"
+        )
+    converter = _TYPE_CONVERTERS[target]
+    try:
+        return converter(value)
+    except (ValueError, TypeError) as exc:
+        raise TypeError(
+            f"Cannot convert {type(value).__name__} {value!r} to {target}"
+        ) from exc

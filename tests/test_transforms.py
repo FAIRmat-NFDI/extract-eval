@@ -8,6 +8,7 @@ from struct_extract_eval.core.transforms.builtins import (
     transform_round_digits,
     transform_sort_tokens,
     transform_strip,
+    transform_type_convert,
 )
 
 
@@ -147,3 +148,45 @@ def test_round_digits_missing_param_raises() -> None:
 def test_round_digits_nan() -> None:
     result = transform_round_digits(float("nan"), {"digits": 2})
     assert math.isnan(result)
+
+
+# --- type_convert ---
+
+
+def test_type_convert_str_to_float() -> None:
+    assert transform_type_convert("3.14", {"to": "float"}) == 3.14
+
+
+def test_type_convert_str_to_int() -> None:
+    assert transform_type_convert("42", {"to": "int"}) == 42
+
+
+def test_type_convert_int_to_str() -> None:
+    assert transform_type_convert(42, {"to": "str"}) == "42"
+
+
+def test_type_convert_float_to_int() -> None:
+    assert transform_type_convert(3.0, {"to": "int"}) == 3
+
+
+def test_type_convert_str_to_bool() -> None:
+    assert transform_type_convert("1", {"to": "bool"}) is True
+
+
+def test_type_convert_int_to_float() -> None:
+    assert transform_type_convert(300, {"to": "float"}) == 300.0
+
+
+def test_type_convert_missing_param_raises() -> None:
+    with pytest.raises(TypeError, match="requires 'to'"):
+        transform_type_convert("42", {})
+
+
+def test_type_convert_invalid_target_raises() -> None:
+    with pytest.raises(ValueError, match="must be one of"):
+        transform_type_convert("42", {"to": "complex"})
+
+
+def test_type_convert_unconvertible_raises() -> None:
+    with pytest.raises(TypeError, match="Cannot convert"):
+        transform_type_convert("not_a_number", {"to": "float"})
