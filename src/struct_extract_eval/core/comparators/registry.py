@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from struct_extract_eval.core.comparators.comparator import Comparator
 from struct_extract_eval.core.comparators.exact import compare_exact
 from struct_extract_eval.core.comparators.numeric import compare_numeric

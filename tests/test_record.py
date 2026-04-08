@@ -1,5 +1,5 @@
 from struct_extract_eval.core.scoring import FieldResult
-from struct_extract_eval.pipeline.record import (
+from struct_extract_eval.core.record import (
     RecordResult,
     build_record_result,
     build_run_result,

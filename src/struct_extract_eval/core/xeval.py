@@ -46,15 +46,8 @@ def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, ob
 def _default_comparator(schema: dict[str, object]) -> str:
     """Infer the default comparator from the schema node's type."""
     json_type = resolve_type(schema)
-
     if json_type in ("number", "integer"):
         return "numeric"
-    if json_type == "boolean":
-        return "exact"
-    if json_type == "string":
-        return "exact"
-    if json_type == "object":
-        return "exact"
     return "exact"
 
 
