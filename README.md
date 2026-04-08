@@ -312,9 +312,10 @@ flag does not matter for scoring.
   - **Parent in gold, missing from extracted:** every leaf descendant becomes an omission.
   - **Parent present in both:** children are evaluated normally using their own `x-eval-required` flags for gold
     validation only -- scoring depends on what gold contains.
-- **`x-eval-skip: true` means fully invisible.** The field is completely excluded from scoring -- no value comparison,
-  no presence check, no contribution to precision, recall, F1, or `total_fields`. The scoring path skips over it as if
-  it does not exist in the schema. If you want presence checking, don't mark it skip -- use a real comparator.
+- **`x-eval-skip: true` means excluded from metrics.** The field is excluded from all metric calculations -- no value
+  comparison, no presence check, no contribution to precision, recall, F1, or `total_fields`. Skip fields still appear
+  in the results (with status `"skipped"`) for visibility and debugging, but they are filtered out when calculating
+  scores. If you want presence checking, don't mark it skip -- use a real comparator.
   `x-eval-skip` is orthogonal to both `x-eval-compare` and `x-eval-required`:
   - **`required: true` + `skip: true`** -- gold MUST have this field (`validate_gold()` checks), but scoring ignores it.
     Useful for fields like "description" that every record should have, but whose value can't be judged.

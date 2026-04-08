@@ -15,7 +15,7 @@ from struct_extract_eval.xeval import parse_xeval_entry
 
 logger = logging.getLogger(__name__)
 
-FieldStatus = Literal["match", "mismatch", "omission", "hallucination"]
+FieldStatus = Literal["match", "mismatch", "omission", "hallucination", "skipped"]
 
 
 @dataclass
@@ -38,6 +38,8 @@ def score_record(
     """Walk the SchemaNode tree, comparing gold and extracted at each field.
 
     Returns a flat list of FieldResult, one per leaf field encountered.
+    Skip fields are included with status ``"skipped"`` for visibility,
+    but are excluded from all metric calculations.
     """
     return _score_node(schema, gold, extracted)
 
@@ -76,8 +78,19 @@ def _score_object(
             # Array items node -- handled by _score_array on the parent
             continue
 
-        # Skip fields are fully invisible to scoring
+        # Skip fields are included in results for visibility but excluded
+        # from all metric calculations (precision, recall, F1, total_fields).
         if child.skip:
+            gold_val = gold_dict.get(field_name)
+            extracted_val = extracted_dict.get(field_name)
+            results.append(FieldResult(
+                path=child.path,
+                score=0.0,
+                comparator="",
+                gold_value=gold_val,
+                extracted_value=extracted_val,
+                status="skipped",
+            ))
             continue
 
         gold_has = field_name in gold_dict
@@ -130,10 +143,15 @@ def _score_leaf(
     extracted_value: object,
 ) -> list[FieldResult]:
     """Score a leaf node: apply transforms, then comparator."""
-    # Skip fields are filtered out by _score_object before reaching here.
-    # Defensive guard: if a skip node reaches here, produce no results.
     if node.skip:
-        return []
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="skipped",
+        )]
 
     gold_transformed = _apply_transforms(gold_value, node.transform)
     extracted_transformed = _apply_transforms(extracted_value, node.transform)

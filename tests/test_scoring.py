@@ -382,7 +382,7 @@ class TestDeeplyNested:
 
 
 class TestSkipFields:
-    def test_skip_field_produces_no_results(self) -> None:
+    def test_skip_field_included_in_results_as_skipped(self) -> None:
         schema = _make_schema({
             "type": "object",
             "properties": {
@@ -395,9 +395,13 @@ class TestSkipFields:
             {"name": "Alice", "description": "some text"},
             {"name": "Alice", "description": "other text"},
         )
-        # description is skip -- fully invisible, only name is scored
-        assert len(results) == 1
-        assert results[0].path == "name"
+        # description is skip -- present in results for visibility, with status "skipped"
+        assert len(results) == 2
+        by_path = {r.path: r for r in results}
+        assert by_path["name"].status == "match"
+        assert by_path["description"].status == "skipped"
+        assert by_path["description"].gold_value == "some text"
+        assert by_path["description"].extracted_value == "other text"
 
     def test_skip_field_missing_in_extracted_no_omission(self) -> None:
         schema = _make_schema({
@@ -412,9 +416,11 @@ class TestSkipFields:
             {"name": "Alice", "description": "some text"},
             {"name": "Alice"},
         )
-        # description is skip -- no omission even though gold has it
-        assert len(results) == 1
-        assert results[0].path == "name"
+        # description is skip -- still "skipped", not "omission"
+        assert len(results) == 2
+        by_path = {r.path: r for r in results}
+        assert by_path["name"].status == "match"
+        assert by_path["description"].status == "skipped"
 
     def test_skip_field_missing_in_gold_no_hallucination(self) -> None:
         schema = _make_schema({
@@ -429,13 +435,15 @@ class TestSkipFields:
             {"name": "Alice"},
             {"name": "Alice", "description": "extra text"},
         )
-        # description is skip -- no hallucination even though extracted has it
-        assert len(results) == 1
-        assert results[0].path == "name"
+        # description is skip -- still "skipped", not "hallucination"
+        assert len(results) == 2
+        by_path = {r.path: r for r in results}
+        assert by_path["name"].status == "match"
+        assert by_path["description"].status == "skipped"
 
-    def test_skip_with_required_true_invisible_to_scoring(self) -> None:
+    def test_skip_excluded_from_metrics(self) -> None:
         # x-eval-required: true (default) + x-eval-skip: true
-        # required only matters for validate_gold(), scoring ignores skip fields
+        # skip fields appear in results but don't affect precision/recall/F1
         schema = _make_schema({
             "type": "object",
             "properties": {
@@ -448,5 +456,8 @@ class TestSkipFields:
             {"name": "Alice", "description": "text"},
             {"name": "Alice"},
         )
-        assert len(results) == 1
-        assert results[0].path == "name"
+        assert len(results) == 2
+        # Only "name" should contribute to metrics
+        scored = [r for r in results if r.status != "skipped"]
+        assert len(scored) == 1
+        assert scored[0].path == "name"
