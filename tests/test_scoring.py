@@ -1,6 +1,6 @@
 from struct_extract_eval.core.scoring import score_record
 from struct_extract_eval.core.schema import parse_schema
-from struct_extract_eval.xeval import add_default_xeval
+from struct_extract_eval.core.xeval import add_default_xeval
 
 
 def _make_schema(raw: dict[str, object]) -> "SchemaNode":  # noqa: F821

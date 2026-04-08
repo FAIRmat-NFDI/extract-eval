@@ -21,7 +21,7 @@ from struct_extract_eval.core.transforms.registry import (
     TransformNotFoundError,
     get_transform,
 )
-from struct_extract_eval.xeval import parse_xeval_entry
+from struct_extract_eval.core.xeval import parse_xeval_entry
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,6 @@ from struct_extract_eval.core.json_utils import (
     get_node_at_path,
     is_leaf,
     iter_schema,
-    load_schema,
     resolve_type,
     walk_schema,
 )

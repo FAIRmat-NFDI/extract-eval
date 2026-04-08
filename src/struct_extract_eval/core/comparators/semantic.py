@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 from struct_extract_eval.core.comparators.comparator import ComparatorResult

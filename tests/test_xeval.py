@@ -1,6 +1,6 @@
 import pytest
 
-from struct_extract_eval.xeval import add_default_xeval, parse_xeval_entry
+from struct_extract_eval.core.xeval import add_default_xeval, parse_xeval_entry
 
 
 class TestParseXevalEntry:

@@ -1,6 +1,6 @@
 import pytest
 
-from struct_extract_eval.core.instance_to_resolved_schema import infer_schema
+from struct_extract_eval.core.schema_inference import infer_schema
 from struct_extract_eval.core.json_utils import get_node_at_path
 
 
