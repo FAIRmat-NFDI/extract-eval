@@ -297,22 +297,32 @@ flag does not matter for scoring.
 **Key details:**
 
 - **`x-eval-required` is a constraint on gold, not on scoring.** The flag tells you whether it is acceptable for gold
-  to omit a field. `required: true` (the default) means gold MUST have this field -- if gold is missing it, that's a
-  data quality error. `required: false` means gold MAY be missing this field -- it is structurally absent in some
-  records, and that's fine. Once a field is present in gold, the extractor is expected to produce it. Once a field is
-  absent in gold, the extractor is expected to not produce it. The scoring path does not branch on `required` at all --
-  it simply compares whatever gold has against whatever extracted has. The only place `required` matters is gold
-  validation, before scoring begins: a `required: true` field missing from gold is flagged as a data quality error; a
-  `required: false` field missing from gold is silently accepted.
+  to omit a field. `x-eval-required: true` (the default) means gold MUST have this field -- if gold is missing it,
+  that's a data quality error. `x-eval-required: false` means gold MAY be missing this field -- it is structurally
+  absent in some records, and that's fine. Once a field is present in gold, the extractor is expected to produce it.
+  Once a field is absent in gold, the extractor is expected to not produce it. The scoring path does not branch on
+  `x-eval-required` at all -- it simply compares whatever gold has against whatever extracted has. The only place
+  `x-eval-required` matters is gold validation, before scoring begins: an `x-eval-required: true` field missing from
+  gold is flagged as a data quality error; an `x-eval-required: false` field missing from gold is silently accepted.
 - **`null` is a value, not absence.** A key present with value `null` is different from a missing key. `null` vs
   `"alice"` is a mismatch (score 0). `null` vs `null` is a match (score 1).
-- **`x-eval-required` is not inherited.** An optional parent does not make its children optional, and children's
-  `required` flags do not leak upward. Three cases:
-  - **Optional parent is missing from extracted:** 0 fields counted. Children are never reached, so there is no
-    penalty, regardless of how many leaves the parent has or whether those leaves are individually required.
-  - **Required parent is missing from extracted:** every leaf descendant becomes an omission.
-  - **Parent is present:** children are evaluated normally using their own `x-eval-required` flags.
-- **Fields with `x-eval-skip: true`** are excluded from value comparison and do not affect precision, recall, F1, or `total_fields`. Presence/absence is still scored based on what's in gold.
+- **`x-eval-required` is not inherited.** A parent's `x-eval-required` does not affect its children, and children's
+  flags do not leak upward. Three cases:
+  - **Parent absent in both gold and extracted:** 0 fields counted. Children are never reached.
+  - **Parent in gold, missing from extracted:** every leaf descendant becomes an omission.
+  - **Parent present in both:** children are evaluated normally using their own `x-eval-required` flags for gold
+    validation only -- scoring depends on what gold contains.
+- **`x-eval-skip` controls value comparison, not presence.** When `x-eval-skip: true`, the field's value is never
+  compared -- it does not contribute to precision, recall, F1, or `total_fields`. But presence/absence is still scored
+  based on what's in gold. Whether a missing skip field penalizes recall depends on `x-eval-required`:
+  - `x-eval-required: true` (default): gold must have this field. If the extractor omits it, that's an omission --
+    penalizes recall. The field should exist even though its value isn't checked.
+  - `x-eval-required: false`: gold may or may not have this field. If gold doesn't have it, a missing extraction is
+    fine -- no penalty. If gold does have it, the extractor is still expected to produce it.
+
+  `x-eval-skip` is orthogonal to `x-eval-compare`. A field can declare both `x-eval-skip: true` and
+  `x-eval-compare: "semantic"` -- the comparator documents what kind of field it is. When `x-eval-skip: true`, the
+  comparator is ignored.
 - **Only schema-defined fields are evaluated.** Extra fields in the data that don't appear in the schema are invisible to
   the evaluator -- no penalty, no hallucination. See [#26](https://github.com/FAIRmat-NFDI/extract-eval/issues/26) for
   planned `additionalProperties` support.
