@@ -177,6 +177,8 @@ def _omission_results(node: SchemaNode) -> list[FieldResult]:
     into all children so every leaf in the subtree is marked as an omission.
     For array nodes, returns empty -- a missing array has no elements to score.
     """
+    if node.skip:
+        return []
     if node.json_type == "object" and node.children:
         results: list[FieldResult] = []
         for child in node.children:
@@ -204,6 +206,8 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
     into all children so every leaf in the subtree is marked as a hallucination.
     For array nodes, returns empty.
     """
+    if node.skip:
+        return []
     if node.json_type == "object" and node.children:
         results: list[FieldResult] = []
         extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}

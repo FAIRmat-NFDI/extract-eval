@@ -1,9 +1,7 @@
 """x-eval-* utilities.
 
 ``add_default_xeval`` annotates a resolved schema in-place with sensible
-``x-eval-*`` defaults. Most leaf fields get an explicit ``x-eval-compare``;
-leaves where no meaningful comparator applies (e.g. opaque objects) get
-``x-eval-skip: true`` instead.
+``x-eval-*`` defaults. Every leaf field gets an explicit ``x-eval-compare``.
 ``x-eval-required`` is only annotated when ``false``; the default is ``true``.
 
 ``parse_xeval_entry`` is the shared parser for the two-shape rule used
@@ -44,11 +42,8 @@ def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, ob
     )
 
 
-def _default_comparator(schema: dict[str, object]) -> str | None:
-    """Infer the default comparator from the schema node's type.
-
-    Returns None for types that should be skipped (e.g. opaque objects).
-    """
+def _default_comparator(schema: dict[str, object]) -> str:
+    """Infer the default comparator from the schema node's type."""
     json_type = resolve_type(schema)
 
     if json_type in ("number", "integer"):
@@ -58,9 +53,7 @@ def _default_comparator(schema: dict[str, object]) -> str | None:
     if json_type == "string":
         return "exact"
     if json_type == "object":
-        return None  # opaque objects get x-eval-skip: true
-    # Fallback for unknown types
-    # todo: add semantic ??
+        return "exact"
     return "exact"
 
 
@@ -69,8 +62,7 @@ def add_default_xeval(schema: dict[str, object]) -> dict[str, object]:
 
     Walks the schema tree. For each leaf node without an explicit
     ``x-eval-compare`` or ``x-eval-skip``, infers the comparator from
-    the node's type. Leaves where no comparator applies (e.g. opaque
-    objects with no properties) get ``x-eval-skip: true`` instead.
+    the node's type.
     For each property of an object, infers ``x-eval-required`` from
     the parent's ``required`` array (explicit ``x-eval-required`` is
     never overridden). The ``required`` array is then removed -- the
@@ -87,11 +79,7 @@ def _annotate_node(schema: dict[str, object]) -> None:
     """Recursively annotate a single schema node."""
     if is_leaf(schema):
         if "x-eval-compare" not in schema and "x-eval-skip" not in schema:
-            comparator = _default_comparator(schema)
-            if comparator is None:
-                schema["x-eval-skip"] = True
-            else:
-                schema["x-eval-compare"] = comparator
+            schema["x-eval-compare"] = _default_comparator(schema)
         return
 
     # Container node (object or array): set x-eval-required on children,

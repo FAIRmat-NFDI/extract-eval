@@ -7,8 +7,6 @@ Walks the SchemaNode tree and verifies that fields with
 Run this before evaluation so data quality issues surface early.
 """
 
-from copy import deepcopy
-
 from struct_extract_eval.core.schema import SchemaNode, parse_schema
 
 
@@ -39,7 +37,7 @@ def validate_gold(
         GoldValidationError: if a ``required=True`` field is missing from
             a gold record.
     """
-    tree = parse_schema(deepcopy(schema))
+    tree = parse_schema(schema)
     for i, g in enumerate(gold):
         if id_field:
             if id_field not in g:
