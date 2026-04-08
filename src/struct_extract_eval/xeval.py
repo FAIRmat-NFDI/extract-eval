@@ -1,8 +1,9 @@
 """x-eval-* utilities.
 
 ``add_default_xeval`` annotates a resolved schema in-place with sensible
-``x-eval-*`` defaults so that downstream consumers always
-have explicit ``x-eval-compare`` on every leaf field.
+``x-eval-*`` defaults. Most leaf fields get an explicit ``x-eval-compare``;
+leaves where no meaningful comparator applies (e.g. opaque objects) get
+``x-eval-skip: true`` instead.
 ``x-eval-required`` is only annotated when ``false``; the default is ``true``.
 
 ``parse_xeval_entry`` is the shared parser for the two-shape rule used
@@ -67,7 +68,9 @@ def add_default_xeval(schema: dict[str, object]) -> dict[str, object]:
     """Annotate a resolved schema in-place with ``x-eval-*`` defaults.
 
     Walks the schema tree. For each leaf node without an explicit
-    ``x-eval-compare``, infers the comparator from the node's type.
+    ``x-eval-compare`` or ``x-eval-skip``, infers the comparator from
+    the node's type. Leaves where no comparator applies (e.g. opaque
+    objects with no properties) get ``x-eval-skip: true`` instead.
     For each property of an object, infers ``x-eval-required`` from
     the parent's ``required`` array (explicit ``x-eval-required`` is
     never overridden). The ``required`` array is then removed -- the

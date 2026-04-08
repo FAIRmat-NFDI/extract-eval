@@ -376,3 +376,77 @@ class TestDeeplyNested:
         omissions = [r for r in results if r.status == "omission"]
         assert len(matched) == 2  # S1's id and value
         assert len(omissions) == 2  # S2's id and value
+
+
+# --- Skip fields ---
+
+
+class TestSkipFields:
+    def test_skip_field_produces_no_results(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string", "x-eval-skip": True},
+            },
+        })
+        results = score_record(
+            schema,
+            {"name": "Alice", "description": "some text"},
+            {"name": "Alice", "description": "other text"},
+        )
+        # description is skip -- fully invisible, only name is scored
+        assert len(results) == 1
+        assert results[0].path == "name"
+
+    def test_skip_field_missing_in_extracted_no_omission(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string", "x-eval-skip": True},
+            },
+        })
+        results = score_record(
+            schema,
+            {"name": "Alice", "description": "some text"},
+            {"name": "Alice"},
+        )
+        # description is skip -- no omission even though gold has it
+        assert len(results) == 1
+        assert results[0].path == "name"
+
+    def test_skip_field_missing_in_gold_no_hallucination(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string", "x-eval-skip": True},
+            },
+        })
+        results = score_record(
+            schema,
+            {"name": "Alice"},
+            {"name": "Alice", "description": "extra text"},
+        )
+        # description is skip -- no hallucination even though extracted has it
+        assert len(results) == 1
+        assert results[0].path == "name"
+
+    def test_skip_with_required_true_invisible_to_scoring(self) -> None:
+        # x-eval-required: true (default) + x-eval-skip: true
+        # required only matters for validate_gold(), scoring ignores skip fields
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string", "x-eval-skip": True},
+            },
+        })
+        results = score_record(
+            schema,
+            {"name": "Alice", "description": "text"},
+            {"name": "Alice"},
+        )
+        assert len(results) == 1
+        assert results[0].path == "name"

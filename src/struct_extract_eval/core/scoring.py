@@ -15,7 +15,7 @@ from struct_extract_eval.xeval import parse_xeval_entry
 
 logger = logging.getLogger(__name__)
 
-FieldStatus = Literal["match", "mismatch", "omission", "hallucination", "skipped"]
+FieldStatus = Literal["match", "mismatch", "omission", "hallucination"]
 
 
 @dataclass
@@ -76,6 +76,10 @@ def _score_object(
             # Array items node -- handled by _score_array on the parent
             continue
 
+        # Skip fields are fully invisible to scoring
+        if child.skip:
+            continue
+
         gold_has = field_name in gold_dict
         extracted_has = field_name in extracted_dict
 
@@ -125,16 +129,11 @@ def _score_leaf(
     gold_value: object,
     extracted_value: object,
 ) -> list[FieldResult]:
-    """Score a leaf node: apply transforms, then comparator. Skip nodes bypass comparison."""
+    """Score a leaf node: apply transforms, then comparator."""
+    # Skip fields are filtered out by _score_object before reaching here.
+    # Defensive guard: if a skip node reaches here, produce no results.
     if node.skip:
-        return [FieldResult(
-            path=node.path,
-            score=0.0,
-            comparator="",
-            gold_value=gold_value,
-            extracted_value=extracted_value,
-            status="skipped",
-        )]
+        return []
 
     gold_transformed = _apply_transforms(gold_value, node.transform)
     extracted_transformed = _apply_transforms(extracted_value, node.transform)
@@ -142,7 +141,7 @@ def _score_leaf(
     comparator_fn = get_comparator(node.comparator)
     result = comparator_fn(gold_transformed, extracted_transformed, node.comparator_params)
 
-    if result.score >= 1.0:
+    if result.score == 1.0:
         status = "match"
     else:
         status = "mismatch"

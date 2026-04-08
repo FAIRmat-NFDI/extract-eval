@@ -15,8 +15,8 @@ Walk the schema, compare each field with the right tool for its type, and aggreg
 
 - **Per-field comparators** -- `exact` for IDs and enums, `numeric` with tolerance for floats, `oneof` for known
   synonyms, `semantic` for free text via an LLM judge. Custom comparators can be registered.
-- **Skip** -- `x-eval-skip: true` opts a field out of value comparison entirely. Presence/absence is still scored based
-  on what's in gold.
+- **Skip** -- `x-eval-skip: true` makes a field fully invisible to scoring. No value comparison, no presence check, no
+  contribution to any metric.
 - **Transforms** -- chain preprocessing steps (`lowercase`, `strip`, `round_digits`, ...) before comparison.
 - **Structural alignment** -- match objects by key name, arrays by position (key-field and Hungarian matching planned).
 - **Precision / recall / F1** -- precision penalizes hallucinated fields, recall penalizes omissions. Per-record and
@@ -312,17 +312,20 @@ flag does not matter for scoring.
   - **Parent in gold, missing from extracted:** every leaf descendant becomes an omission.
   - **Parent present in both:** children are evaluated normally using their own `x-eval-required` flags for gold
     validation only -- scoring depends on what gold contains.
-- **`x-eval-skip` controls value comparison, not presence.** When `x-eval-skip: true`, the field's value is never
-  compared -- it does not contribute to precision, recall, F1, or `total_fields`. But presence/absence is still scored
-  based on what's in gold. Whether a missing skip field penalizes recall depends on `x-eval-required`:
-  - `x-eval-required: true` (default): gold must have this field. If the extractor omits it, that's an omission --
-    penalizes recall. The field should exist even though its value isn't checked.
-  - `x-eval-required: false`: gold may or may not have this field. If gold doesn't have it, a missing extraction is
-    fine -- no penalty. If gold does have it, the extractor is still expected to produce it.
-
-  `x-eval-skip` is orthogonal to `x-eval-compare`. A field can declare both `x-eval-skip: true` and
-  `x-eval-compare: "semantic"` -- the comparator documents what kind of field it is. When `x-eval-skip: true`, the
-  comparator is ignored.
+- **`x-eval-skip: true` means fully invisible.** The field is completely excluded from scoring -- no value comparison,
+  no presence check, no contribution to precision, recall, F1, or `total_fields`. The scoring path skips over it as if
+  it does not exist in the schema. If you want presence checking, don't mark it skip -- use a real comparator.
+  `x-eval-skip` is orthogonal to both `x-eval-compare` and `x-eval-required`:
+  - **`required: true` + `skip: true`** -- gold MUST have this field (`validate_gold()` checks), but scoring ignores it.
+    Useful for fields like "description" that every record should have, but whose value can't be judged.
+  - **`required: false` + `skip: true`** -- gold MAY omit this field, and scoring ignores it either way.
+  - A field can declare both `x-eval-skip: true` and `x-eval-compare: "semantic"` -- the comparator documents what kind
+    of field it is. Toggling skip on/off doesn't lose the comparator config. When skip is `true`, the comparator is
+    ignored.
+  - **Presence-only checking:** if you want to score whether a field is present or missing, but don't care about its
+    value (e.g., a "description" field the extractor should always produce, but whose content doesn't matter), don't use
+    skip. Instead, use a custom comparator that always returns score 1.0. The field will participate in scoring normally
+    -- omission if missing, hallucination if extra -- but any value is accepted when both sides are present.
 - **Only schema-defined fields are evaluated.** Extra fields in the data that don't appear in the schema are invisible to
   the evaluator -- no penalty, no hallucination. See [#26](https://github.com/FAIRmat-NFDI/extract-eval/issues/26) for
   planned `additionalProperties` support.
@@ -465,7 +468,7 @@ All evaluation config lives in the JSON schema. No separate config file.
 |-----------------------------|---------------------------------------------------------------------|--------------------|-----------------------------------------------------------|
 | `x-eval-required`           | Gold validation: is it OK for gold to omit this field?              | `true`             | `false`                                                   |
 | `x-eval-compare`            | Which comparator to use                                             | inferred from type | `"semantic"`, `{"numeric": {"tolerance": {"rel": 0.01}}}` |
-| `x-eval-skip`              | Opt field out of value comparison                                   | `false`            | `true`                                                    |
+| `x-eval-skip`              | Make field fully invisible to scoring                               | `false`            | `true`                                                    |
 | `x-eval-transform`          | Preprocessing chain (both sides)                                    | none               | `["lowercase", "strip"]`                                  |
 | `x-eval-allow-extra-fields` | at root level, role is similar to json schema `additionalProperties` | false              | true                                                      |
 

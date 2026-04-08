@@ -41,7 +41,16 @@ def validate_gold(
     """
     tree = parse_schema(deepcopy(schema))
     for i, g in enumerate(gold):
-        record_id = g[id_field] if id_field else i
+        if id_field:
+            if id_field not in g:
+                raise GoldValidationError(
+                    f"Record {i!r}: id field '{id_field}' is missing from gold",
+                    record_id=i,
+                    path=id_field,
+                )
+            record_id: str | int = g[id_field]  # type: ignore[assignment]
+        else:
+            record_id = i
         _validate_node(tree, g, record_id)
 
 
@@ -51,13 +60,19 @@ def _validate_node(
     record_id: str | int,
 ) -> None:
     """Recursively validate a gold value against a schema node."""
-    if node.json_type == "object" and node.children:
-        gold_dict = gold_value if isinstance(gold_value, dict) else {}
+    if gold_value is not None and node.json_type == "object" and node.children:
+        if not isinstance(gold_value, dict):
+            raise GoldValidationError(
+                f"Record {record_id!r}: expected dict at '{node.path}', "
+                f"got {type(gold_value).__name__}",
+                record_id=record_id,
+                path=node.path,
+            )
         for child in node.children:
             field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
             if field_name == "[]":
                 continue
-            if field_name not in gold_dict:
+            if field_name not in gold_value:
                 if child.required:
                     raise GoldValidationError(
                         f"Record {record_id!r}: required field '{child.path}' "
@@ -66,9 +81,15 @@ def _validate_node(
                         path=child.path,
                     )
             else:
-                _validate_node(child, gold_dict[field_name], record_id)
-    elif node.json_type == "array" and node.children:
-        gold_list = gold_value if isinstance(gold_value, list) else []
+                _validate_node(child, gold_value[field_name], record_id)
+    elif gold_value is not None and node.json_type == "array" and node.children:
+        if not isinstance(gold_value, list):
+            raise GoldValidationError(
+                f"Record {record_id!r}: expected list at '{node.path}', "
+                f"got {type(gold_value).__name__}",
+                record_id=record_id,
+                path=node.path,
+            )
         items_node = node.children[0]
-        for item in gold_list:
+        for item in gold_value:
             _validate_node(items_node, item, record_id)

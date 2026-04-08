@@ -52,13 +52,13 @@ class TestBuildRecordResult:
         assert r.recall == 1.0
         assert r.f1 > 0.0
 
-    def test_skipped_excluded_from_counts(self) -> None:
+    def test_skip_fields_produce_no_results(self) -> None:
+        # Skip fields are filtered out by the scoring layer and never
+        # appear in field_results. An empty list means no scored fields.
         fields = [
             FieldResult("name", 1.0, "exact", "Alice", "Alice", "match"),
-            FieldResult("comment", 0.0, "", "blah", "blah", "skipped"),
         ]
         r = build_record_result(0, fields, {}, {})
-        # skipped field should not affect precision/recall
         assert r.precision == 1.0
         assert r.recall == 1.0
         assert r.f1 == 1.0
@@ -84,7 +84,6 @@ class TestBuildRecordResult:
             FieldResult("b", 0.0, "exact", "y", "z", "mismatch"),
             FieldResult("c", 0.0, "exact", "w", None, "omission"),
             FieldResult("d", 0.0, "exact", None, "ghost", "hallucination"),
-            FieldResult("e", 0.0, "", "free", "text", "skipped"),
         ]
         r = build_record_result(0, fields, {}, {})
         # precision denominator: match(a) + mismatch(b) + hallucination(d) = 3
@@ -161,10 +160,10 @@ class TestBuildRunResult:
         assert run.total_records == 0
         assert run.per_field == {}
 
-    def test_skipped_excluded_from_field_counts(self) -> None:
-        r1 = self._make_record(0, [
-            FieldResult("comment", 0.0, "", "a", "b", "skipped"),
-        ])
+    def test_skip_fields_absent_from_results(self) -> None:
+        # Skip fields are filtered out by scoring and never reach
+        # build_run_result. An empty record has no fields to count.
+        r1 = self._make_record(0, [])
         run = build_run_result([r1])
-        assert "comment" not in run.per_field
+        assert run.per_field == {}
         assert run.total_fields == 0
