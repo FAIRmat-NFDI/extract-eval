@@ -27,7 +27,7 @@ class ComparatorSpec:
     """
 
     name: str = ""
-    params: dict[str, object] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 class Comparator(Protocol):

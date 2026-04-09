@@ -325,7 +325,9 @@ class TestOrderedArray:
         assert len(results) == 3
         assert all(r.status == "omission" for r in results)
         assert all(r.score == 0 for r in results)
-        assert all(r.path == "tags[]" for r in results) # this is not "tags" because the array node itself is not missing, just all its items -- so we report omissions for the items with path "tags[]"
+        # One omission per missing element, reported at the synthetic items path "tags[]"
+        # rather than the array node path "tags".
+        assert all(r.path == "tags[]" for r in results)
 
 
     def test_missing_array_in_gold_produces_hallucinations(self) -> None:
@@ -395,6 +397,78 @@ class TestOrderedArray:
         results = score_record(schema, gold, {})
         assert len(results) == 2
         assert all(r.status == "omission" for r in results)
+
+
+class TestArrayTypeErrors:
+    """Type errors at array paths: extracted (or gold) is not a list."""
+
+    def _schema(self) -> "SchemaNode":  # noqa: F821
+        return _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+        })
+
+    def test_gold_list_extracted_not_list(self) -> None:
+        # gold=[a,b], extracted="bad" -> 2 omissions per element
+        schema = self._schema()
+        results = score_record(schema, {"tags": ["a", "b"]}, {"tags": "bad"})
+        assert len(results) == 2
+        assert all(r.status == "omission" for r in results)
+        assert all(r.path == "tags[]" for r in results)
+
+    def test_gold_not_list_extracted_list(self) -> None:
+        # gold="bad", extracted=[a,b] -> 2 hallucinations per element
+        schema = self._schema()
+        results = score_record(schema, {"tags": "bad"}, {"tags": ["a", "b"]})
+        assert len(results) == 2
+        assert all(r.status == "hallucination" for r in results)
+        assert all(r.path == "tags[]" for r in results)
+
+    def test_gold_empty_extracted_not_list(self) -> None:
+        # gold=[], extracted="bad" -> 1 mismatch for the array node
+        schema = self._schema()
+        results = score_record(schema, {"tags": []}, {"tags": "bad"})
+        assert len(results) == 1
+        assert results[0].path == "tags"
+        assert results[0].status == "mismatch"
+        assert results[0].score == 0.0
+
+    def test_gold_not_list_extracted_empty(self) -> None:
+        # gold="bad", extracted=[] -> 1 mismatch for the array node
+        schema = self._schema()
+        results = score_record(schema, {"tags": "bad"}, {"tags": []})
+        assert len(results) == 1
+        assert results[0].path == "tags"
+        assert results[0].status == "mismatch"
+
+    def test_both_not_list(self) -> None:
+        # gold="bad", extracted="bad" -> 1 mismatch for the array node
+        schema = self._schema()
+        results = score_record(schema, {"tags": "bad"}, {"tags": "also_bad"})
+        assert len(results) == 1
+        assert results[0].path == "tags"
+        assert results[0].status == "mismatch"
+
+    def test_gold_not_list_extracted_missing(self) -> None:
+        # gold="bad", extracted missing -> 1 omission for the array node
+        schema = self._schema()
+        results = score_record(schema, {"tags": "bad"}, {})
+        assert len(results) == 1
+        assert results[0].path == "tags"
+        assert results[0].status == "omission"
+
+    def test_gold_missing_extracted_not_list(self) -> None:
+        # gold missing, extracted="bad" -> 1 hallucination for the array node
+        schema = self._schema()
+        results = score_record(schema, {}, {"tags": "bad"})
+        assert len(results) == 1
+        assert results[0].path == "tags"
+        assert results[0].status == "hallucination"
 
 
 # --- Transforms ---

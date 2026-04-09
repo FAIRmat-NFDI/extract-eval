@@ -149,15 +149,20 @@ def _resolve_comparator_spec(
     return ComparatorSpec(name=name, params=params)
 
 
-def _resolve_transform_specs(schema: dict[str, object]) -> list[TransformSpec]:
+def _resolve_transform_specs(
+    schema: dict[str, object], path: str
+) -> list[TransformSpec]:
     """Build a list of TransformSpec from x-eval-transform.
 
-    Returns an empty list if x-eval-transform is absent. Shape and name
-    resolution have already been validated by _validate_xeval.
+    Returns an empty list if x-eval-transform is absent. Raises SchemaError
+    if it is present but not a list. Entry shapes and name resolution have
+    already been verified by _validate_xeval.
     """
-    raw = schema.get("x-eval-transform")
-    if not isinstance(raw, list):
+    if "x-eval-transform" not in schema:
         return []
+    raw = schema["x-eval-transform"]
+    if not isinstance(raw, list):
+        raise SchemaError("x-eval-transform must be a list", path)
     specs: list[TransformSpec] = []
     for entry in raw:
         name, params = parse_xeval_entry(entry)
@@ -174,7 +179,7 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
         raise SchemaError("Missing or invalid 'type'", path)
 
     comparator = _resolve_comparator_spec(schema, path)
-    transforms = _resolve_transform_specs(schema)
+    transforms = _resolve_transform_specs(schema, path)
 
     children = [
         _build_node(child_schema, child_path)

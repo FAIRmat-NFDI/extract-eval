@@ -15,20 +15,20 @@ from struct_extract_eval.core.xeval import add_default_xeval, parse_xeval_entry
 from struct_extract_eval.evaluator import evaluate, generate_eval_schema
 
 __all__ = [
-    "add_default_xeval",
     "ComparatorSpec",
-    "evaluate",
-    "generate_eval_schema",
     "FieldAggregation",
     "FieldResult",
     "GoldValidationError",
-    "infer_schema",
-    "parse_schema",
-    "parse_xeval_entry",
     "RecordResult",
     "RunResult",
     "SchemaNode",
-    "score_record",
     "TransformSpec",
+    "add_default_xeval",
+    "evaluate",
+    "generate_eval_schema",
+    "infer_schema",
+    "parse_schema",
+    "parse_xeval_entry",
+    "score_record",
     "validate_gold",
 ]
