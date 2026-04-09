@@ -221,8 +221,9 @@ def _omission_results(node: SchemaNode, gold_value: object = None) -> list[Field
 
     Can be called on any node, not just leaves. For object nodes, recurses
     into all children so every leaf in the subtree is marked as an omission.
-    For array nodes, uses the gold value to emit one omission per gold element
-    (or one match if gold is empty -- see _score_array_ordered's empty-vs-empty rule).
+    For array nodes, emits one omission per gold element; if the gold array
+    is empty (or a non-list coerced to empty) while extracted is missing the
+    field entirely, emits a single omission for the array node itself.
     """
     if node.skip:
         return []
@@ -244,7 +245,7 @@ def _omission_results(node: SchemaNode, gold_value: object = None) -> list[Field
                 "Expected list at '%s', got %s in gold", node.path, type(gold_value).__name__
             )
         gold_list = gold_value if isinstance(gold_value, list) else []
-        items_node = node.children[0] # arrays have exactly one child: the items schema
+        items_node = node.children[0]  # arrays have exactly one child: the items schema
         if len(gold_list) == 0:
             # gold is empty array (or non-list coerced), extracted is missing
             # the field entirely: emit one omission for the array node itself.
@@ -276,9 +277,10 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
 
     Can be called on any node, not just leaves. For object nodes, recurses
     into all children so every leaf in the subtree is marked as a hallucination.
-    For array nodes, uses the extracted value to emit one hallucination per
-    extracted element (or one match if extracted is empty -- see _score_array_ordered's
-    empty-vs-empty rule).
+    For array nodes, emits one hallucination per extracted element; if the
+    extracted array is empty (or a non-list coerced to empty) while gold is
+    missing the field entirely, emits a single hallucination for the array
+    node itself.
     """
     if node.skip:
         return []
