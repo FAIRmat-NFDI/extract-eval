@@ -48,12 +48,42 @@ def transform_round_digits(value: Any, params: dict[str, Any]) -> Any:
     return round(value, digits)
 
 
+_TRUTHY = frozenset({"1", "true", "yes"})
+_FALSY = frozenset({"0", "false", "no"})
+
+
+def _convert_bool(value: Any) -> bool:
+    """Parse a value to bool with strict validation.
+
+    Accepts: bool, 0/1 (int), and case-insensitive strings
+    "1"/"true"/"yes" (truthy) or "0"/"false"/"no" (falsy).
+    Raises TypeError for anything else.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+    if isinstance(value, str):
+        lower = value.strip().lower()
+        if lower in _TRUTHY:
+            return True
+        if lower in _FALSY:
+            return False
+    raise TypeError(
+        f"Cannot convert {type(value).__name__} {value!r} to bool"
+    )
+
+
 _TYPE_CONVERTERS: dict[str, type] = {
     "float": float,
     "int": int,
     "str": str,
-    "bool": bool,
 }
+
+_VALID_TARGETS = frozenset({"float", "int", "str", "bool"})
 
 
 def transform_type_convert(value: Any, params: dict[str, Any]) -> Any:
@@ -64,10 +94,12 @@ def transform_type_convert(value: Any, params: dict[str, Any]) -> Any:
     if "to" not in params:
         raise TypeError("type_convert transform requires 'to' parameter")
     target = params["to"]
-    if target not in _TYPE_CONVERTERS:
+    if target not in _VALID_TARGETS:
         raise ValueError(
-            f"type_convert 'to' must be one of {sorted(_TYPE_CONVERTERS)}, got {target!r}"
+            f"type_convert 'to' must be one of {sorted(_VALID_TARGETS)}, got {target!r}"
         )
+    if target == "bool":
+        return _convert_bool(value)
     converter = _TYPE_CONVERTERS[target]
     try:
         return converter(value)
