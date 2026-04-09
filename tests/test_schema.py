@@ -2,12 +2,14 @@ import logging
 
 import pytest
 
+from struct_extract_eval.core.comparators.comparator import ComparatorSpec
 from struct_extract_eval.core.schema import (
     SchemaError,
     SchemaNode,
     _validate_xeval,
     parse_schema,
 )
+from struct_extract_eval.core.transforms.transform import TransformSpec
 
 # --- SchemaError ---
 
@@ -29,11 +31,11 @@ class TestSchemaError:
 
 class TestSchemaNode:
     def test_defaults(self) -> None:
-        node = SchemaNode(path="", json_type="object", comparator="exact")
+        node = SchemaNode(path="", json_type="object", comparator=ComparatorSpec("exact"))
         assert node.children == []
-        assert node.transform is None
+        assert node.transforms == []
         assert node.required is True
-        assert node.comparator_params == {}
+        assert node.comparator.params == {}
 
 
 # --- _default_comparator ---
@@ -173,9 +175,9 @@ class TestParseSchema:
         child = root.children[0]
         assert child.path == "name"
         assert child.json_type == "string"
-        assert child.comparator == "exact"
+        assert child.comparator.name == "exact"
         assert child.required is True
-        assert child.transform is None
+        assert child.transforms == []
 
     def test_comparator_string_form(self) -> None:
         schema: dict[str, object] = {
@@ -185,7 +187,7 @@ class TestParseSchema:
                 "desc": {"type": "string", "x-eval-compare": "semantic"},
             },
         }
-        assert _root_child(schema, "desc").comparator == "semantic"
+        assert _root_child(schema, "desc").comparator.name == "semantic"
 
     def test_xeval_required_false(self) -> None:
         schema: dict[str, object] = {
@@ -214,7 +216,7 @@ class TestParseSchema:
             },
         }
         node = _root_child(schema, "unit")
-        assert node.transform == ["lowercase", "strip"]
+        assert node.transforms == [TransformSpec("lowercase"), TransformSpec("strip")]
 
     def test_xeval_transform_with_params(self) -> None:
         schema: dict[str, object] = {
@@ -229,7 +231,10 @@ class TestParseSchema:
             },
         }
         node = _root_child(schema, "val")
-        assert node.transform == ["strip", {"round_digits": {"digits": 2}}]
+        assert node.transforms == [
+            TransformSpec("strip"),
+            TransformSpec("round_digits", {"digits": 2}),
+        ]
 
     def test_xeval_compare_oneof(self) -> None:
         schema: dict[str, object] = {
@@ -243,8 +248,8 @@ class TestParseSchema:
             },
         }
         node = _root_child(schema, "unit")
-        assert node.comparator == "oneof"
-        assert node.comparator_params == {"values": ["eV", "electronvolt"]}
+        assert node.comparator.name == "oneof"
+        assert node.comparator.params == {"values": ["eV", "electronvolt"]}
 
     def test_xeval_compare_with_params(self) -> None:
         schema: dict[str, object] = {
@@ -258,8 +263,8 @@ class TestParseSchema:
             },
         }
         node = _root_child(schema, "val")
-        assert node.comparator_params == {"tolerance": {"rel": 0.05}}
-        assert node.comparator == "numeric"
+        assert node.comparator.name == "numeric"
+        assert node.comparator.params == {"tolerance": {"rel": 0.05}}
 
     def test_missing_xeval_compare_raises(self) -> None:
         schema: dict[str, object] = {
@@ -410,7 +415,7 @@ class TestParseSchema:
         step_item = steps.children[0]
         duration = step_item.children[0]
         assert duration.path == "layers[].steps[].duration"
-        assert duration.comparator == "numeric"
+        assert duration.comparator.name == "numeric"
 
 
 # --- Test helpers ---

@@ -11,7 +11,7 @@ from typing import Literal
 from struct_extract_eval.core.comparators.registry import get_comparator
 from struct_extract_eval.core.schema import SchemaNode
 from struct_extract_eval.core.transforms.registry import get_transform
-from struct_extract_eval.core.xeval import parse_xeval_entry
+from struct_extract_eval.core.transforms.transform import TransformSpec
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def _score_node(
     if node.json_type == "object" and node.children:
         return _score_object(node, gold_value, extracted_value)
     if node.json_type == "array" and node.children:
-        return _score_array(node, gold_value, extracted_value)
+        return _score_array_ordered(node, gold_value, extracted_value)
     return _score_leaf(node, gold_value, extracted_value)
 
 
@@ -76,7 +76,7 @@ def _score_object(
         # Extract field name from path: "experiment.name" -> "name"
         field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
         if field_name == "[]":
-            # Array items node -- handled by _score_array on the parent
+            # Array items node -- handled by _score_array_ordered on the parent
             continue
 
         # Skip fields are included in results for visibility but excluded
@@ -107,24 +107,30 @@ def _score_object(
     return results
 
 
-def _score_array(
+def _score_array_ordered(
     node: SchemaNode,
     gold_value: object,
     extracted_value: object,
 ) -> list[FieldResult]:
     """Score an array node using ordered (positional) matching."""
     results: list[FieldResult] = []
-    if not isinstance(gold_value, list):
+    gold_is_list = isinstance(gold_value, list)
+    extracted_is_list = isinstance(extracted_value, list)
+    if not gold_is_list:
         logger.warning("Expected list at '%s', got %s in gold", node.path, type(gold_value).__name__)
-    if not isinstance(extracted_value, list):
-        logger.warning("Expected list at '%s', got %s in extracted", node.path, type(extracted_value).__name__)
-    gold_list = gold_value if isinstance(gold_value, list) else []
-    extracted_list = extracted_value if isinstance(extracted_value, list) else []
+    if not extracted_is_list:
+        logger.warning(
+            "Expected list at '%s', got %s in extracted", node.path, type(extracted_value).__name__
+        )
+    gold_list = gold_value if gold_is_list else []
+    extracted_list = extracted_value if extracted_is_list else []
     items_node = node.children[0]  # arrays have exactly one child: the items schema
 
-    # Both empty: the array itself is a match. This is the only case where
-    # the array container node contributes a FieldResult directly.
-    if len(gold_list) == 0 and len(extracted_list) == 0:
+    # Both sides are actual empty lists: the array itself is a match. This is
+    # the only case where the array container node contributes a "match"
+    # FieldResult directly. Coerced empties (from non-list values) do NOT
+    # qualify -- see the next branch.
+    if gold_is_list and extracted_is_list and len(gold_list) == 0 and len(extracted_list) == 0:
         return [FieldResult(
             path=node.path,
             score=1.0,
@@ -132,6 +138,19 @@ def _score_array(
             gold_value=[],
             extracted_value=[],
             status="match",
+        )]
+
+    # Structural failure: at least one side is not a list, and after coercion
+    # there are no elements to per-element score. Emit one mismatch for the
+    # array node so both precision and recall are penalized.
+    if (not gold_is_list or not extracted_is_list) and len(gold_list) == 0 and len(extracted_list) == 0:
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="mismatch",
         )]
 
     # Matched pairs: compare element by element
@@ -166,11 +185,11 @@ def _score_leaf(
             status="skipped",
         )]
 
-    gold_transformed = _apply_transforms(gold_value, node.transform)
-    extracted_transformed = _apply_transforms(extracted_value, node.transform)
+    gold_transformed = _apply_transforms(gold_value, node.transforms)
+    extracted_transformed = _apply_transforms(extracted_value, node.transforms)
 
-    comparator_fn = get_comparator(node.comparator)
-    result = comparator_fn(gold_transformed, extracted_transformed, node.comparator_params)
+    comparator_fn = get_comparator(node.comparator.name)
+    result = comparator_fn(gold_transformed, extracted_transformed, node.comparator.params)
 
     if result.score == 1.0:
         status = "match"
@@ -180,24 +199,20 @@ def _score_leaf(
     return [FieldResult(
         path=node.path,
         score=result.score,
-        comparator=node.comparator,
+        comparator=node.comparator.name,
         gold_value=gold_value,
         extracted_value=extracted_value,
         status=status,
     )]
 
 
-def _apply_transforms(
-    value: object,
-    transforms: list[str | dict[str, object]] | None,
-) -> object:
+def _apply_transforms(value: object, transforms: list[TransformSpec]) -> object:
     """Apply a chain of transforms to a value. Skip if value is None."""
-    if value is None or transforms is None:
+    if value is None or not transforms:
         return value
-    for transform_entry in transforms:
-        name, params = parse_xeval_entry(transform_entry)
-        fn = get_transform(name)
-        value = fn(value, params)
+    for spec in transforms:
+        fn = get_transform(spec.name)
+        value = fn(value, spec.params)
     return value
 
 
@@ -206,12 +221,17 @@ def _omission_results(node: SchemaNode, gold_value: object = None) -> list[Field
 
     Can be called on any node, not just leaves. For object nodes, recurses
     into all children so every leaf in the subtree is marked as an omission.
-    For array nodes, uses the gold value to emit one omission per gold element
-    (or one match if gold is empty -- see _score_array's empty-vs-empty rule).
+    For array nodes, emits one omission per gold element; if the gold array
+    is empty (or a non-list coerced to empty) while extracted is missing the
+    field entirely, emits a single omission for the array node itself.
     """
     if node.skip:
         return []
     if node.json_type == "object" and node.children:
+        if gold_value is not None and not isinstance(gold_value, dict):
+            logger.warning(
+                "Expected dict at '%s', got %s in gold", node.path, type(gold_value).__name__
+            )
         gold_dict = gold_value if isinstance(gold_value, dict) else {}
         results: list[FieldResult] = []
         for child in node.children:
@@ -220,13 +240,32 @@ def _omission_results(node: SchemaNode, gold_value: object = None) -> list[Field
             results.extend(_omission_results(child, child_gold))
         return results
     if node.json_type == "array" and node.children:
-        # Reuse _score_array with empty extracted side. This handles both
-        # the empty-vs-empty match and per-element omissions for non-empty gold.
-        return _score_array(node, gold_value, [])
+        if gold_value is not None and not isinstance(gold_value, list):
+            logger.warning(
+                "Expected list at '%s', got %s in gold", node.path, type(gold_value).__name__
+            )
+        gold_list = gold_value if isinstance(gold_value, list) else []
+        items_node = node.children[0]  # arrays have exactly one child: the items schema
+        if len(gold_list) == 0:
+            # gold is empty array (or non-list coerced), extracted is missing
+            # the field entirely: emit one omission for the array node itself.
+            # Preserve the original gold_value (even if wrong-typed) for diagnostics.
+            return [FieldResult(
+                path=node.path,
+                score=0.0,
+                comparator="",
+                gold_value=gold_value,
+                extracted_value=None,
+                status="omission",
+            )]
+        item_results: list[FieldResult] = []
+        for elem in gold_list:
+            item_results.extend(_omission_results(items_node, elem))
+        return item_results
     return [FieldResult(
         path=node.path,
         score=0.0,
-        comparator=node.comparator,
+        comparator=node.comparator.name,
         gold_value=gold_value,
         extracted_value=None,
         status="omission",
@@ -238,13 +277,20 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
 
     Can be called on any node, not just leaves. For object nodes, recurses
     into all children so every leaf in the subtree is marked as a hallucination.
-    For array nodes, uses the extracted value to emit one hallucination per
-    extracted element (or one match if extracted is empty -- see _score_array's
-    empty-vs-empty rule).
+    For array nodes, emits one hallucination per extracted element; if the
+    extracted array is empty (or a non-list coerced to empty) while gold is
+    missing the field entirely, emits a single hallucination for the array
+    node itself.
     """
     if node.skip:
         return []
     if node.json_type == "object" and node.children:
+        if extracted_value is not None and not isinstance(extracted_value, dict):
+            logger.warning(
+                "Expected dict at '%s', got %s in extracted",
+                node.path,
+                type(extracted_value).__name__,
+            )
         results: list[FieldResult] = []
         extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
         for child in node.children:
@@ -253,12 +299,34 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
             results.extend(_hallucination_results(child, child_value))
         return results
     if node.json_type == "array" and node.children:
-        # Reuse _score_array with empty gold side.
-        return _score_array(node, [], extracted_value)
+        if extracted_value is not None and not isinstance(extracted_value, list):
+            logger.warning(
+                "Expected list at '%s', got %s in extracted",
+                node.path,
+                type(extracted_value).__name__,
+            )
+        extracted_list = extracted_value if isinstance(extracted_value, list) else []
+        items_node = node.children[0]
+        if len(extracted_list) == 0:
+            # extracted is empty array (or non-list coerced), gold is missing
+            # the field entirely: emit one hallucination for the array node itself.
+            # Preserve the original extracted_value (even if wrong-typed) for diagnostics.
+            return [FieldResult(
+                path=node.path,
+                score=0.0,
+                comparator="",
+                gold_value=None,
+                extracted_value=extracted_value,
+                status="hallucination",
+            )]
+        item_results: list[FieldResult] = []
+        for elem in extracted_list:
+            item_results.extend(_hallucination_results(items_node, elem))
+        return item_results
     return [FieldResult(
         path=node.path,
         score=0.0,
-        comparator=node.comparator,
+        comparator=node.comparator.name,
         gold_value=None,
         extracted_value=extracted_value,
         status="hallucination",

@@ -18,6 +18,18 @@ class ComparatorResult:
     needs_judge: bool = field(default=False)
 
 
+@dataclass
+class ComparatorSpec:
+    """Reference to a comparator: name + params.
+
+    Stored on a SchemaNode after parsing. Container nodes (objects/arrays)
+    use the empty default since they are scored via their children.
+    """
+
+    name: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
+
+
 class Comparator(Protocol):
     """Interface for comparator functions."""
 

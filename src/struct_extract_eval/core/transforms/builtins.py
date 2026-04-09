@@ -56,7 +56,7 @@ def _convert_bool(value: Any) -> bool:
     """Parse a value to bool with strict validation.
 
     Accepts: bool, 0/1 (int), and case-insensitive strings
-    "1"/"true"/"yes" (truthy) or "0"/"false"/"no" (falsy).
+    "1"/"true" or "0"/"false".
     Raises TypeError for anything else.
     """
     if isinstance(value, bool):

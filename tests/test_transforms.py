@@ -173,16 +173,14 @@ def test_type_convert_str_to_bool_truthy() -> None:
     assert transform_type_convert("1", {"to": "bool"}) is True
     assert transform_type_convert("true", {"to": "bool"}) is True
     assert transform_type_convert("True", {"to": "bool"}) is True
-    assert transform_type_convert("yes", {"to": "bool"}) is True
-    assert transform_type_convert("YES", {"to": "bool"}) is True
+    assert transform_type_convert("TRUE", {"to": "bool"}) is True
 
 
 def test_type_convert_str_to_bool_falsy() -> None:
     assert transform_type_convert("0", {"to": "bool"}) is False
     assert transform_type_convert("false", {"to": "bool"}) is False
     assert transform_type_convert("False", {"to": "bool"}) is False
-    assert transform_type_convert("no", {"to": "bool"}) is False
-    assert transform_type_convert("NO", {"to": "bool"}) is False
+    assert transform_type_convert("FALSE", {"to": "bool"}) is False
 
 
 def test_type_convert_int_to_bool() -> None:
@@ -198,6 +196,8 @@ def test_type_convert_bool_to_bool() -> None:
 def test_type_convert_invalid_bool_raises() -> None:
     with pytest.raises(TypeError, match="Cannot convert"):
         transform_type_convert("not_a_bool", {"to": "bool"})
+    with pytest.raises(TypeError, match="Cannot convert"):
+        transform_type_convert("yes", {"to": "bool"})
     with pytest.raises(TypeError, match="Cannot convert"):
         transform_type_convert("2", {"to": "bool"})
     with pytest.raises(TypeError, match="Cannot convert"):
