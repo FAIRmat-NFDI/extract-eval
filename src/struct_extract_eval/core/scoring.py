@@ -100,7 +100,7 @@ def _score_object(
         if gold_has and extracted_has:
             results.extend(_score_node(child, gold_dict[field_name], extracted_dict[field_name]))
         elif gold_has and not extracted_has:
-            results.extend(_omission_results(child))
+            results.extend(_omission_results(child, gold_dict[field_name]))
         elif extracted_has and not gold_has:
             results.extend(_hallucination_results(child, extracted_dict[field_name]))
 
@@ -122,6 +122,18 @@ def _score_array(
     extracted_list = extracted_value if isinstance(extracted_value, list) else []
     items_node = node.children[0]  # arrays have exactly one child: the items schema
 
+    # Both empty: the array itself is a match. This is the only case where
+    # the array container node contributes a FieldResult directly.
+    if len(gold_list) == 0 and len(extracted_list) == 0:
+        return [FieldResult(
+            path=node.path,
+            score=1.0,
+            comparator="",
+            gold_value=[],
+            extracted_value=[],
+            status="match",
+        )]
+
     # Matched pairs: compare element by element
     matched_count = min(len(gold_list), len(extracted_list))
     for i in range(matched_count):
@@ -129,7 +141,7 @@ def _score_array(
 
     # Extra gold elements: omissions
     for i in range(matched_count, len(gold_list)):
-        results.extend(_omission_results(items_node))
+        results.extend(_omission_results(items_node, gold_list[i]))
 
     # Extra extracted elements: hallucinations
     for i in range(matched_count, len(extracted_list)):
@@ -189,30 +201,33 @@ def _apply_transforms(
     return value
 
 
-def _omission_results(node: SchemaNode) -> list[FieldResult]:
+def _omission_results(node: SchemaNode, gold_value: object = None) -> list[FieldResult]:
     """Generate omission FieldResults for all leaves under a missing node.
 
     Can be called on any node, not just leaves. For object nodes, recurses
     into all children so every leaf in the subtree is marked as an omission.
-    For array nodes, returns empty -- a missing array has no elements to score.
+    For array nodes, uses the gold value to emit one omission per gold element
+    (or one match if gold is empty -- see _score_array's empty-vs-empty rule).
     """
     if node.skip:
         return []
     if node.json_type == "object" and node.children:
+        gold_dict = gold_value if isinstance(gold_value, dict) else {}
         results: list[FieldResult] = []
         for child in node.children:
-            results.extend(_omission_results(child))
+            field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
+            child_gold = gold_dict.get(field_name)
+            results.extend(_omission_results(child, child_gold))
         return results
     if node.json_type == "array" and node.children:
-        # Missing array: no elements to score. We don't know how many
-        # elements gold had, so we can't generate per-element omissions.
-        # todo: accept gold value so we can score omissions per element.
-        return []
+        # Reuse _score_array with empty extracted side. This handles both
+        # the empty-vs-empty match and per-element omissions for non-empty gold.
+        return _score_array(node, gold_value, [])
     return [FieldResult(
         path=node.path,
         score=0.0,
         comparator=node.comparator,
-        gold_value=None,
+        gold_value=gold_value,
         extracted_value=None,
         status="omission",
     )]
@@ -223,7 +238,9 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
 
     Can be called on any node, not just leaves. For object nodes, recurses
     into all children so every leaf in the subtree is marked as a hallucination.
-    For array nodes, returns empty.
+    For array nodes, uses the extracted value to emit one hallucination per
+    extracted element (or one match if extracted is empty -- see _score_array's
+    empty-vs-empty rule).
     """
     if node.skip:
         return []
@@ -236,7 +253,8 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
             results.extend(_hallucination_results(child, child_value))
         return results
     if node.json_type == "array" and node.children:
-        return []
+        # Reuse _score_array with empty gold side.
+        return _score_array(node, [], extracted_value)
     return [FieldResult(
         path=node.path,
         score=0.0,

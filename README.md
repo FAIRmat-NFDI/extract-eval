@@ -328,8 +328,7 @@ flag does not matter for scoring.
     skip. Instead, use a custom comparator that always returns score 1.0. The field will participate in scoring normally
     -- omission if missing, hallucination if extra -- but any value is accepted when both sides are present.
 - **Only schema-defined fields are evaluated.** Extra fields in the data that don't appear in the schema are invisible to
-  the evaluator -- no penalty, no hallucination. See [#26](https://github.com/FAIRmat-NFDI/extract-eval/issues/26) for
-  planned `additionalProperties` support.
+  the evaluator -- no penalty, no hallucination.
 
 ---
 
@@ -471,7 +470,6 @@ All evaluation config lives in the JSON schema. No separate config file.
 | `x-eval-compare`            | Which comparator to use                                             | inferred from type | `"semantic"`, `{"numeric": {"tolerance": {"rel": 0.01}}}` |
 | `x-eval-skip`              | Make field fully invisible to scoring                               | `false`            | `true`                                                    |
 | `x-eval-transform`          | Preprocessing chain (both sides)                                    | none               | `["lowercase", "strip"]`                                  |
-| `x-eval-allow-extra-fields` | at root level, role is similar to json schema `additionalProperties` | false              | true                                                      |
 
 ### Config Syntax
 
