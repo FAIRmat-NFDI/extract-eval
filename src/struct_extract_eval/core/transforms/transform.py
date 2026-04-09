@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 
-@dataclass(frozen=True)
+@dataclass
 class TransformSpec:
     """Reference to a transform in a chain: name + params.
 

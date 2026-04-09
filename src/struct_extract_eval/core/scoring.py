@@ -248,11 +248,12 @@ def _omission_results(node: SchemaNode, gold_value: object = None) -> list[Field
         if len(gold_list) == 0:
             # gold is empty array (or non-list coerced), extracted is missing
             # the field entirely: emit one omission for the array node itself.
+            # Preserve the original gold_value (even if wrong-typed) for diagnostics.
             return [FieldResult(
                 path=node.path,
                 score=0.0,
                 comparator="",
-                gold_value=gold_value if isinstance(gold_value, list) else [],
+                gold_value=gold_value,
                 extracted_value=None,
                 status="omission",
             )]
@@ -307,12 +308,13 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
         if len(extracted_list) == 0:
             # extracted is empty array (or non-list coerced), gold is missing
             # the field entirely: emit one hallucination for the array node itself.
+            # Preserve the original extracted_value (even if wrong-typed) for diagnostics.
             return [FieldResult(
                 path=node.path,
                 score=0.0,
                 comparator="",
                 gold_value=None,
-                extracted_value=extracted_value if isinstance(extracted_value, list) else [],
+                extracted_value=extracted_value,
                 status="hallucination",
             )]
         item_results: list[FieldResult] = []

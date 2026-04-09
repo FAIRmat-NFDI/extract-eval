@@ -18,7 +18,7 @@ class ComparatorResult:
     needs_judge: bool = field(default=False)
 
 
-@dataclass(frozen=True)
+@dataclass
 class ComparatorSpec:
     """Reference to a comparator: name + params.
 
