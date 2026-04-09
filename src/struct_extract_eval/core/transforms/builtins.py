@@ -48,8 +48,8 @@ def transform_round_digits(value: Any, params: dict[str, Any]) -> Any:
     return round(value, digits)
 
 
-_TRUTHY = frozenset({"1", "true", "yes"})
-_FALSY = frozenset({"0", "false", "no"})
+_TRUTHY = frozenset({"1", "true"})
+_FALSY = frozenset({"0", "false"})
 
 
 def _convert_bool(value: Any) -> bool:
