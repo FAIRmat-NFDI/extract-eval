@@ -12,6 +12,7 @@ comparator since they are scored via their children, not directly.
 import logging
 from dataclasses import dataclass, field
 
+from struct_extract_eval.core.comparators.comparator import ComparatorSpec
 from struct_extract_eval.core.comparators.registry import (
     ComparatorNotFoundError,
     get_comparator,
@@ -21,6 +22,7 @@ from struct_extract_eval.core.transforms.registry import (
     TransformNotFoundError,
     get_transform,
 )
+from struct_extract_eval.core.transforms.transform import TransformSpec
 from struct_extract_eval.core.xeval import parse_xeval_entry
 
 logger = logging.getLogger(__name__)
@@ -50,12 +52,11 @@ class SchemaNode:
 
     path: str  # field path
     json_type: str
-    comparator: str
+    comparator: ComparatorSpec = field(default_factory=ComparatorSpec)
     children: list["SchemaNode"] = field(default_factory=list)
     required: bool = True
     skip: bool = False
-    transform: list[str | dict[str, object]] | None = None
-    comparator_params: dict[str, object] = field(default_factory=dict)
+    transforms: list[TransformSpec] = field(default_factory=list)
 
 
 def _validate_xeval(schema: dict[str, object], path: str) -> None:
@@ -122,10 +123,10 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
                 raise SchemaError(f"Unknown transform: '{transform_name}'", path) from err
 
 
-def _resolve_comparator(
+def _resolve_comparator_spec(
     schema: dict[str, object], path: str
-) -> tuple[str, dict[str, object]]:
-    """Extract comparator name and params from x-eval-compare.
+) -> ComparatorSpec:
+    """Build a ComparatorSpec from x-eval-compare.
 
     Raises SchemaError if x-eval-compare is missing on a non-skip leaf node.
     Non-leaf nodes without x-eval-compare get an empty placeholder
@@ -138,14 +139,30 @@ def _resolve_comparator(
             raise SchemaError(
                 "missing x-eval-compare -- run add_default_xeval first", path
             )
-        return "", {}
+        return ComparatorSpec()
 
     raw = schema["x-eval-compare"]
     try:
         name, params = parse_xeval_entry(raw)
     except (TypeError, ValueError) as exc:
         raise SchemaError(f"invalid x-eval-compare: {exc}", path) from exc
-    return name, params
+    return ComparatorSpec(name=name, params=params)
+
+
+def _resolve_transform_specs(schema: dict[str, object]) -> list[TransformSpec]:
+    """Build a list of TransformSpec from x-eval-transform.
+
+    Returns an empty list if x-eval-transform is absent. Shape and name
+    resolution have already been validated by _validate_xeval.
+    """
+    raw = schema.get("x-eval-transform")
+    if not isinstance(raw, list):
+        return []
+    specs: list[TransformSpec] = []
+    for entry in raw:
+        name, params = parse_xeval_entry(entry)
+        specs.append(TransformSpec(name=name, params=params))
+    return specs
 
 
 def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
@@ -156,25 +173,21 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
     if json_type is None:
         raise SchemaError("Missing or invalid 'type'", path)
 
-    comparator, comparator_params = _resolve_comparator(schema, path)
+    comparator = _resolve_comparator_spec(schema, path)
+    transforms = _resolve_transform_specs(schema)
 
     children = [
         _build_node(child_schema, child_path)
         for _name, child_schema, child_path in get_children(schema, path)
     ]
 
-    raw_transform = schema.get("x-eval-transform")
-    transform = list(raw_transform) if isinstance(raw_transform, list) else None
-
     node = SchemaNode(
         path=path,
         json_type=json_type,
         comparator=comparator,
         children=children,
-        transform=transform,
+        transforms=transforms,
     )
-    if comparator_params:
-        node.comparator_params = comparator_params
     if "x-eval-required" in schema:
         node.required = bool(schema["x-eval-required"])
     if schema.get("x-eval-skip"):

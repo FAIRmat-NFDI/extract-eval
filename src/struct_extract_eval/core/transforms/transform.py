@@ -1,4 +1,17 @@
+from dataclasses import dataclass, field
 from typing import Any, Protocol
+
+
+@dataclass(frozen=True)
+class TransformSpec:
+    """Reference to a transform in a chain: name + params.
+
+    Stored on a SchemaNode after parsing. A chain of TransformSpecs
+    represents the full ``x-eval-transform`` config for a field.
+    """
+
+    name: str
+    params: dict[str, object] = field(default_factory=dict)
 
 
 class Transform(Protocol):
