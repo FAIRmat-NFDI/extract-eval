@@ -46,6 +46,7 @@ class RunResult:
     total_fields: int
     total_omissions: int
     total_hallucinations: int
+    total_batch_errors: int
     per_field: dict[str, FieldAggregation]
 
 
@@ -57,12 +58,13 @@ def build_record_result(
 ) -> RecordResult:
     """Compute precision, recall, F1 from field results.
 
-    Counting logic (skipped fields are present in results for visibility
-    but excluded from all metric calculations):
+    Counting logic (skipped and batch_error fields are present in results for
+    visibility but excluded from all metric calculations):
     - match/mismatch: contributes to both precision and recall denominators
     - omission (FN): contributes to recall denominator only
     - hallucination (FP): contributes to precision denominator only
     - skipped: excluded from all counts
+    - batch_error: excluded from all counts (judge failed to give a verdict)
     """
     precision_num = 0.0
     precision_den = 0.0
@@ -70,7 +72,7 @@ def build_record_result(
     recall_den = 0.0
 
     for fr in field_results:
-        if fr.status == "skipped":
+        if fr.status == "skipped" or fr.status == "batch_error":
             continue
         if fr.status == "omission":
             recall_den += 1.0
@@ -115,6 +117,7 @@ def build_run_result(records: list[RecordResult]) -> RunResult:
             total_fields=0,
             total_omissions=0,
             total_hallucinations=0,
+            total_batch_errors=0,
             per_field={},
         )
 
@@ -125,10 +128,14 @@ def build_run_result(records: list[RecordResult]) -> RunResult:
     total_fields = 0
     total_omissions = 0
     total_hallucinations = 0
+    total_batch_errors = 0
 
     for record in records:
         for fr in record.field_results:
             if fr.status == "skipped":
+                continue
+            if fr.status == "batch_error":
+                total_batch_errors += 1
                 continue
             total_fields += 1
             if fr.status == "omission":
@@ -169,5 +176,6 @@ def build_run_result(records: list[RecordResult]) -> RunResult:
         total_fields=total_fields,
         total_omissions=total_omissions,
         total_hallucinations=total_hallucinations,
+        total_batch_errors=total_batch_errors,
         per_field=per_field,
     )

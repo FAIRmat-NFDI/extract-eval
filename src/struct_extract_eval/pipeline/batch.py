@@ -1,0 +1,155 @@
+"""Batch comparator dispatch.
+
+After ``score_record`` finishes, some FieldResults may have ``pending_batch``
+set (provisional placeholders for fields that use a BatchComparator).
+``process_batches`` finds these, groups them by comparator name, looks up the
+registered handler, and calls it once per group with the full list of items.
+
+Each handler returns a positional list (one entry per input item, in order):
+- ``ComparatorResult``: the handler decided this item -- score and status are
+  applied to the corresponding FieldResult
+- ``None``: the handler couldn't decide for this item -- the FieldResult gets
+  ``status=batch_error``
+
+Failure handling:
+- Handler raises (whole batch) -> all items in that group get status=batch_error
+- Handler returns non-list -> all items get batch_error
+- Handler returns short list -> trailing items get batch_error
+- Handler returns long list -> trimmed with a warning (trailing entries discarded)
+- Per-item None -> only THAT item gets batch_error; others are unaffected
+- Per-item non-ComparatorResult value -> THAT item gets batch_error
+
+Batch errors are EXCLUDED from precision/recall/F1, like skipped fields.
+"""
+
+import logging
+
+from struct_extract_eval.core.comparators.comparator import (
+    BatchItem,
+    ComparatorResult,
+)
+from struct_extract_eval.core.comparators.registry import get_comparator, is_batch
+from struct_extract_eval.core.scoring import FieldResult
+
+logger = logging.getLogger(__name__)
+
+
+def process_batches(field_results: list[FieldResult]) -> list[FieldResult]:
+    """Find pending batch fields, group by comparator name, dispatch to handlers.
+
+    Mutates ``field_results`` in place AND returns it (for chaining). After this
+    runs, no FieldResult should still have ``pending_batch`` set.
+    """
+    # Group by pending_batch label, preserving original order within each group
+    groups: dict[str, list[FieldResult]] = {}
+    for r in field_results:
+        if r.pending_batch:
+            groups.setdefault(r.pending_batch, []).append(r)
+
+    if not groups:
+        return field_results
+
+    for name, results in groups.items():
+        try:
+            fn = get_comparator(name)
+        except KeyError:
+            logger.error(
+                "No comparator registered for pending batch '%s' "
+                "(at paths %s). Marking %d items as batch_error.",
+                name, [r.path for r in results], len(results),
+            )
+            _mark_all_error(results)
+            continue
+
+        if not is_batch(fn):
+            logger.error(
+                "Comparator '%s' is not a BatchComparator (no is_batch=True) "
+                "but %d fields were dispatched to it. Marking as batch_error.",
+                name, len(results),
+            )
+            _mark_all_error(results)
+            continue
+
+        items = [
+            BatchItem(
+                path=r.path,
+                gold_raw=r.gold_value,
+                extracted_raw=r.extracted_value,
+                gold_compared=r.gold_compared,
+                extracted_compared=r.extracted_compared,
+            )
+            for r in results
+        ]
+
+        try:
+            outputs = fn(items)
+        except Exception as exc:
+            logger.error(
+                "Batch comparator '%s' raised for %d items at paths %s: %s. "
+                "Marking all as batch_error.",
+                name, len(items), [it.path for it in items], exc,
+            )
+            _mark_all_error(results)
+            continue
+
+        if not isinstance(outputs, list):
+            logger.error(
+                "Batch comparator '%s' returned %s instead of a list "
+                "(expected %d results). Marking all as batch_error.",
+                name, type(outputs).__name__, len(items),
+            )
+            _mark_all_error(results)
+            continue
+
+        if len(outputs) > len(items):
+            logger.warning(
+                "Batch comparator '%s' returned %d results for %d items; "
+                "trimming extras.",
+                name, len(outputs), len(items),
+            )
+            outputs = outputs[: len(items)]
+        elif len(outputs) < len(items):
+            logger.error(
+                "Batch comparator '%s' returned %d results for %d items; "
+                "missing trailing items marked batch_error.",
+                name, len(outputs), len(items),
+            )
+
+        # Apply outputs back to FieldResults in order. Each output entry can be:
+        # - ComparatorResult: success, apply score+status
+        # - None: per-item failure, mark this field as batch_error (not the rest)
+        # - anything else: invalid handler return type, mark as batch_error
+        for i, r in enumerate(results):
+            if i >= len(outputs):
+                # Short list: trailing items get batch_error
+                r.status = "batch_error"
+                r.pending_batch = None
+                continue
+            out = outputs[i]
+            if out is None:
+                # Per-item failure -- explicit None signals "couldn't decide"
+                r.status = "batch_error"
+                r.pending_batch = None
+                continue
+            if not isinstance(out, ComparatorResult):
+                logger.error(
+                    "Batch comparator '%s' returned %s at index %d (path '%s'); "
+                    "expected ComparatorResult or None. Marking as batch_error.",
+                    name, type(out).__name__, i, r.path,
+                )
+                r.status = "batch_error"
+                r.pending_batch = None
+                continue
+            r.score = out.score
+            r.reason = out.reason
+            r.status = "match" if out.score >= 1.0 else "mismatch"
+            r.pending_batch = None
+
+    return field_results
+
+
+def _mark_all_error(results: list[FieldResult]) -> None:
+    """Mark every FieldResult as batch_error and clear pending_batch."""
+    for r in results:
+        r.status = "batch_error"
+        r.pending_batch = None

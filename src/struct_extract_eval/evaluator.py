@@ -8,6 +8,15 @@ before running. Typical flow:
     2. eval_schema = generate_eval_schema(schema=resolved)
     3. # review / edit eval_schema
     4. result = evaluate(gold, extracted, schema=eval_schema)
+
+Batch comparators (LLM judge, embedding similarity, etc.) are not included
+by default. Register them yourself before calling evaluate():
+
+    from struct_extract_eval.core.comparators.registry import register
+    from struct_extract_eval.pipeline import GroqJudge, SemanticBatchComparator
+
+    register("semantic", SemanticBatchComparator(GroqJudge()))
+    result = evaluate(gold, extracted, schema)
 """
 
 from copy import deepcopy
@@ -27,10 +36,20 @@ def _run_evaluation(
     pairs: list[tuple[str | int, dict[str, object], dict[str, object]]],
     tree: SchemaNode,
 ) -> RunResult:
-    """Score all pairs against a parsed schema tree."""
+    """Score all pairs against a parsed schema tree.
+
+    Any field with ``pending_batch`` set is resolved via ``process_batches``
+    after per-record scoring. The dispatch happens record-by-record so each
+    record's batch handlers see only that record's pending fields (matches the
+    "one judge call per record" design).
+    """
+    # Imported lazily so the core has no hard dependency on the pipeline layer.
+    from struct_extract_eval.pipeline.batch import process_batches
+
     records = []
     for record_id, g, e in pairs:
         field_results = score_record(tree, g, e)
+        process_batches(field_results)
         records.append(build_record_result(record_id, field_results, g, e))
     return build_run_result(records)
 
@@ -41,12 +60,17 @@ def evaluate(
     schema: dict[str, object],
     id_field: str | None = None,
 ) -> RunResult:
-    """Evaluate extracted instances against gold using field-level comparison.
+    """Evaluate extracted records against gold using field-level comparison.
 
     Requires an eval schema -- a resolved schema with x-eval-* annotations.
     Generate one with ``generate_eval_schema()``, review and edit it, then
     pass it here. The evaluator does not infer or annotate on your behalf:
     default x-eval-* config must be reviewed by a human before use.
+
+    If your schema references a batch comparator (e.g. ``"semantic"`` or any
+    custom name), register it BEFORE calling evaluate. The library does not
+    auto-register any batch comparators -- you choose which ones to enable
+    and under which name(s).
 
     Args:
         gold: Gold (ground truth) instances.
@@ -61,7 +85,8 @@ def evaluate(
 
     Raises:
         ValueError: if gold and extracted have different lengths.
-        SchemaError: if the schema is missing required x-eval-* annotations.
+        SchemaError: if the schema is missing required x-eval-* annotations
+            or references a comparator that hasn't been registered.
     """
     if len(gold) != len(extracted):
         raise ValueError(
