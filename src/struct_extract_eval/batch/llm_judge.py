@@ -86,7 +86,7 @@ class GroqJudge:
     The API key is read from ``GROQ_API_KEY`` unless passed explicitly.
 
     Caching: in-memory dict keyed by ``(model, gold_str, extracted_str)``.
-    Survives the lifetime of the process only -- no disk persistence yet.
+    for already compared pairs, no need to send to the llm again.
     """
 
     def __init__(
@@ -106,7 +106,7 @@ class GroqJudge:
         self.model = model
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
         self._client = Groq(api_key=api_key or os.environ.get("GROQ_API_KEY"))
-        self._cache: dict[tuple[str, str, str], float] = {}
+        self._cache: dict[tuple[str, str, str], float] = {} # model, gold_str, extracted_str -> score
 
     def judge_batch(self, items: list[JudgeItem]) -> list[float | None]:
         if not items:
