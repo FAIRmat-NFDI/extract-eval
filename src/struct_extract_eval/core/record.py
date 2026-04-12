@@ -106,9 +106,10 @@ def build_record_result(
 
 
 def build_run_result(records: list[RecordResult]) -> RunResult:
-    """
-    Aggregate RecordResults into a RunResult with per-field breakdown.
-    No  records will result precision, recall, and F1 of 1.0 since there are no mismatches or omissions by definition.
+    """Aggregate RecordResults into a RunResult with per-field breakdown.
+
+    No records will result in precision, recall, and F1 of 1.0 since there
+    are no mismatches or omissions by definition.
     """
     if not records:
         return RunResult(

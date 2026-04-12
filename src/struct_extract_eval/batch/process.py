@@ -77,6 +77,7 @@ def process_batches(field_results: list[FieldResult]) -> list[FieldResult]:
                 extracted_raw=r.extracted_value,
                 gold_compared=r.gold_compared,
                 extracted_compared=r.extracted_compared,
+                params=r.comparator_params or {},
             )
             for r in results
         ]

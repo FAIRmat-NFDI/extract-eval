@@ -19,8 +19,8 @@ def _clean_registry() -> None:
 
 def test_builtins_registered() -> None:
     # "semantic" is no longer a builtin -- it's a BatchComparator that the user
-    # registers explicitly (via SemanticBatchComparator) or implicitly (via the
-    # convenience evaluate(judge=...) parameter).
+    # must register explicitly (e.g. via register("semantic", SemanticBatchComparator(...)))
+    # before calling evaluate().
     for name in ("exact", "numeric", "oneof"):
         fn = get_comparator(name)
         assert callable(fn)

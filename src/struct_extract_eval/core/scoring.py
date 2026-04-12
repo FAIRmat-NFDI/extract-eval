@@ -49,6 +49,7 @@ class FieldResult:
     gold_compared: object | None = None
     extracted_compared: object | None = None
     pending_batch: str | None = None
+    comparator_params: dict[str, object] | None = None
 
 
 def score_record(
@@ -229,6 +230,7 @@ def _score_leaf(
             gold_compared=gold_transformed,
             extracted_compared=extracted_transformed,
             pending_batch=node.comparator.name,
+            comparator_params=node.comparator.params or None,
         )]
 
     # Per-field comparator: call inline

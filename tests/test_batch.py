@@ -128,7 +128,7 @@ class TestProcessBatches:
         # Register a fake batch comparator that returns 1 for all items
         class AlwaysMatch:
             is_batch = True
-            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult]:
+            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
                 return [ComparatorResult(score=1.0, comparator="always") for _ in items]
         register("always", AlwaysMatch())
 
@@ -163,7 +163,7 @@ class TestProcessBatches:
     def test_handler_raises_marks_all_batch_error(self) -> None:
         class Raising:
             is_batch = True
-            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult]:
+            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
                 raise RuntimeError("nope")
         register("raising", Raising())
 
@@ -182,7 +182,7 @@ class TestProcessBatches:
     def test_short_response_marks_trailing_batch_error(self) -> None:
         class ShortResponse:
             is_batch = True
-            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult]:
+            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
                 return [ComparatorResult(score=1.0, comparator="short")]  # only 1
         register("short", ShortResponse())
 
@@ -201,7 +201,7 @@ class TestProcessBatches:
     def test_extra_results_trimmed(self) -> None:
         class ExtraResponse:
             is_batch = True
-            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult]:
+            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
                 return [
                     ComparatorResult(score=1.0, comparator="extra"),
                     ComparatorResult(score=0.0, comparator="extra"),
@@ -227,13 +227,13 @@ class TestProcessBatches:
 
         class HandlerA:
             is_batch = True
-            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult]:
+            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
                 calls.append("A")
                 return [ComparatorResult(score=1.0, comparator="A") for _ in items]
 
         class HandlerB:
             is_batch = True
-            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult]:
+            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
                 calls.append("B")
                 return [ComparatorResult(score=0.0, comparator="B") for _ in items]
 
@@ -379,35 +379,33 @@ class QuantityBatchComparator:
         "km": 1000.0, "cm": 0.01, "mm": 0.001,
     }
 
-    def __call__(self, items: list[BatchItem]) -> list[ComparatorResult]:
-        # Group by parent path
-        by_parent: dict[str, list[BatchItem]] = {}
-        for item in items:
+    def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
+        # Group by parent path, tracking original indices for O(n) lookup.
+        by_parent: dict[str, list[tuple[int, BatchItem]]] = {}
+        for i, item in enumerate(items):
             parent = item.path.rsplit(".", 1)[0]
-            by_parent.setdefault(parent, []).append(item)
+            by_parent.setdefault(parent, []).append((i, item))
 
         # Build results in original order
         result_by_index: dict[int, ComparatorResult] = {}
         for parent, group in by_parent.items():
-            length = next((i for i in group if i.path.endswith(".length")), None)
-            unit = next((i for i in group if i.path.endswith(".unit")), None)
+            length = next(((i, it) for i, it in group if it.path.endswith(".length")), None)
+            unit = next(((i, it) for i, it in group if it.path.endswith(".unit")), None)
 
             if length is None or unit is None:
-                for item in group:
-                    idx = items.index(item)
+                for idx, _item in group:
                     result_by_index[idx] = ComparatorResult(
                         score=0.0, comparator="quantity",
                         reason=f"incomplete pair under {parent}",
                     )
                 continue
 
-            score = self._compare(length, unit)
-            for item in group:
-                idx = items.index(item)
+            score = self._compare(length[1], unit[1])
+            for idx, _item in group:
                 result_by_index[idx] = ComparatorResult(
                     score=score, comparator="quantity",
-                    reason=f"{length.gold_compared}{unit.gold_compared} vs "
-                           f"{length.extracted_compared}{unit.extracted_compared}",
+                    reason=f"{length[1].gold_compared}{unit[1].gold_compared} vs "
+                           f"{length[1].extracted_compared}{unit[1].extracted_compared}",
                 )
 
         return [result_by_index[i] for i in range(len(items))]
