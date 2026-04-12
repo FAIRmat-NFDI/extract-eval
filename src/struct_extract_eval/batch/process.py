@@ -5,6 +5,10 @@ set (provisional placeholders for fields that use a BatchComparator).
 ``process_batches`` finds these, groups them by comparator name, looks up the
 registered handler, and calls it once per group with the full list of items.
 
+Comparator params (from ``x-eval-compare`` in the schema) are read from the
+schema tree -- NOT stored on FieldResult. This keeps FieldResult a pure result
+object with no config fields. The tree is passed as a parameter.
+
 Each handler returns a positional list (one entry per input item, in order):
 - ``ComparatorResult``: the handler decided this item -- score and status are
   applied to the corresponding FieldResult
@@ -29,16 +33,42 @@ from struct_extract_eval.core.comparators.comparator import (
     ComparatorResult,
 )
 from struct_extract_eval.core.comparators.registry import get_comparator, is_batch
+from struct_extract_eval.core.schema import SchemaNode
 from struct_extract_eval.core.scoring import FieldResult
 
 logger = logging.getLogger(__name__)
 
 
-def process_batches(field_results: list[FieldResult]) -> list[FieldResult]:
+def _build_path_map(tree: SchemaNode) -> dict[str, SchemaNode]:
+    """Build a flat path -> SchemaNode lookup from the tree.
+
+    Walks the tree recursively. Used by process_batches to look up
+    comparator params without traversing the tree per field.
+    """
+    result: dict[str, SchemaNode] = {}
+
+    def _walk(node: SchemaNode) -> None:
+        if node.path:
+            result[node.path] = node
+        for child in node.children:
+            _walk(child)
+
+    _walk(tree)
+    return result
+
+
+def process_batches(
+    field_results: list[FieldResult],
+    tree: SchemaNode,
+) -> list[FieldResult]:
     """Find pending batch fields, group by comparator name, dispatch to handlers.
 
     Mutates ``field_results`` in place AND returns it (for chaining). After this
     runs, no FieldResult should still have ``pending_batch`` set.
+
+    The ``tree`` parameter provides access to comparator params (from
+    ``x-eval-compare`` in the schema) so they can be passed through to
+    ``BatchItem.params`` without storing config on FieldResult.
     """
     # Group by pending_batch label, preserving original order within each group
     groups: dict[str, list[FieldResult]] = {}
@@ -48,6 +78,9 @@ def process_batches(field_results: list[FieldResult]) -> list[FieldResult]:
 
     if not groups:
         return field_results
+
+    # Build path -> node map once for all groups
+    path_map = _build_path_map(tree)
 
     for name, results in groups.items():
         try:
@@ -77,7 +110,7 @@ def process_batches(field_results: list[FieldResult]) -> list[FieldResult]:
                 extracted_raw=r.extracted_value,
                 gold_compared=r.gold_compared,
                 extracted_compared=r.extracted_compared,
-                params=r.comparator_params or {},
+                params=path_map[r.path].comparator.params if r.path in path_map else {},
             )
             for r in results
         ]

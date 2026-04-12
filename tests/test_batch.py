@@ -20,6 +20,7 @@ from struct_extract_eval.core.comparators.registry import (
     _registry,
     register,
 )
+from struct_extract_eval.core.schema import SchemaNode
 from struct_extract_eval.core.scoring import FieldResult
 from struct_extract_eval.evaluator import evaluate
 from struct_extract_eval.batch import (
@@ -32,6 +33,10 @@ from struct_extract_eval.batch.llm_judge import (
     _coerce_binary_score,
     _parse_judge_response,
 )
+
+
+# Minimal empty tree for process_batches tests that don't need real schema params.
+_EMPTY_TREE = SchemaNode(path="", json_type="object", comparator="")
 
 
 @pytest.fixture(autouse=True)
@@ -120,7 +125,7 @@ class TestProcessBatches:
             FieldResult("a", 1.0, "exact", "x", "x", "match"),
             FieldResult("b", 0.0, "exact", "y", "z", "mismatch"),
         ]
-        process_batches(results)
+        process_batches(results, _EMPTY_TREE)
         assert results[0].status == "match"
         assert results[1].status == "mismatch"
 
@@ -141,7 +146,7 @@ class TestProcessBatches:
                 pending_batch="always",
             ),
         ]
-        process_batches(results)
+        process_batches(results, _EMPTY_TREE)
         assert results[0].status == "match"
         assert results[0].score == 1.0
         assert results[0].pending_batch is None
@@ -156,7 +161,7 @@ class TestProcessBatches:
                 pending_batch="missing",
             ),
         ]
-        process_batches(results)
+        process_batches(results, _EMPTY_TREE)
         assert results[0].status == "batch_error"
         assert results[0].pending_batch is None
 
@@ -175,7 +180,7 @@ class TestProcessBatches:
                         gold_compared="g2", extracted_compared="e2",
                         pending_batch="raising"),
         ]
-        process_batches(results)
+        process_batches(results, _EMPTY_TREE)
         assert all(r.status == "batch_error" for r in results)
         assert all(r.pending_batch is None for r in results)
 
@@ -194,7 +199,7 @@ class TestProcessBatches:
                         gold_compared="g2", extracted_compared="e2",
                         pending_batch="short"),
         ]
-        process_batches(results)
+        process_batches(results, _EMPTY_TREE)
         assert results[0].status == "match"
         assert results[1].status == "batch_error"
 
@@ -217,7 +222,7 @@ class TestProcessBatches:
                         gold_compared="g2", extracted_compared="e2",
                         pending_batch="extra"),
         ]
-        process_batches(results)
+        process_batches(results, _EMPTY_TREE)
         assert results[0].status == "match"
         assert results[1].status == "mismatch"
 
@@ -248,7 +253,7 @@ class TestProcessBatches:
             FieldResult("p3", 0.0, "A", "g", "e", "mismatch",
                         gold_compared="g", extracted_compared="e", pending_batch="A"),
         ]
-        process_batches(results)
+        process_batches(results, _EMPTY_TREE)
         assert calls == ["A", "B"] or calls == ["B", "A"]
         assert len(calls) == 2  # one call per label, not per item
         assert results[0].score == 1.0  # from A

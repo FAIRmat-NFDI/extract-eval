@@ -49,7 +49,7 @@ def _run_evaluation(
     records = []
     for record_id, g, e in pairs:
         field_results = score_record(tree, g, e)
-        process_batches(field_results)
+        process_batches(field_results, tree)
         records.append(build_record_result(record_id, field_results, g, e))
     return build_run_result(records)
 

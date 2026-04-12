@@ -16,7 +16,8 @@ from struct_extract_eval.core.transforms.transform import TransformSpec
 logger = logging.getLogger(__name__)
 
 FieldStatus = Literal[
-    "match", "mismatch", "omission", "hallucination", "skipped", "batch_error"
+    "match", "mismatch", "omission", "hallucination", "skipped",
+    "pending", "batch_error",
 ]
 
 
@@ -49,7 +50,6 @@ class FieldResult:
     gold_compared: object | None = None
     extracted_compared: object | None = None
     pending_batch: str | None = None
-    comparator_params: dict[str, object] | None = None
 
 
 def score_record(
@@ -77,7 +77,7 @@ def _score_node(
         return _score_object(node, gold_value, extracted_value)
     if node.json_type == "array" and node.children:
         return _score_array_ordered(node, gold_value, extracted_value)
-    return _score_leaf(node, gold_value, extracted_value)
+    return [_score_leaf(node, gold_value, extracted_value)]
 
 
 def _score_object(
@@ -195,22 +195,22 @@ def _score_leaf(
     node: SchemaNode,
     gold_value: object,
     extracted_value: object,
-) -> list[FieldResult]:
+) -> FieldResult:
     """Score a leaf node: apply transforms, then dispatch to per-field or batch comparator.
 
-    For per-field comparators, calls the function inline and returns the final result.
-    For batch comparators, returns a provisional FieldResult with pending_batch set
-    to the comparator name; process_batches will fill in the real score later.
+    Returns a single FieldResult. For per-field comparators, the result is final.
+    For batch comparators, the result is provisional (pending_batch set, score=0.0)
+    and process_batches will fill in the real score later.
     """
     if node.skip:
-        return [FieldResult(
+        return FieldResult(
             path=node.path,
             score=0.0,
             comparator="",
             gold_value=gold_value,
             extracted_value=extracted_value,
             status="skipped",
-        )]
+        )
 
     gold_transformed = _apply_transforms(gold_value, node.transforms)
     extracted_transformed = _apply_transforms(extracted_value, node.transforms)
@@ -220,18 +220,17 @@ def _score_leaf(
     if is_batch(comparator_fn):
         # Defer: build a provisional FieldResult, mark pending. process_batches
         # will dispatch this to the registered batch handler later.
-        return [FieldResult(
+        return FieldResult(
             path=node.path,
             score=0.0,
             comparator=node.comparator.name,
             gold_value=gold_value,
             extracted_value=extracted_value,
-            status="mismatch",
+            status="pending",
             gold_compared=gold_transformed,
             extracted_compared=extracted_transformed,
             pending_batch=node.comparator.name,
-            comparator_params=node.comparator.params or None,
-        )]
+        )
 
     # Per-field comparator: call inline
     result = comparator_fn(gold_transformed, extracted_transformed, node.comparator.params)
@@ -241,7 +240,7 @@ def _score_leaf(
     else:
         status = "mismatch"
 
-    return [FieldResult(
+    return FieldResult(
         path=node.path,
         score=result.score,
         comparator=node.comparator.name,
@@ -251,7 +250,7 @@ def _score_leaf(
         reason=result.reason,
         gold_compared=gold_transformed,
         extracted_compared=extracted_transformed,
-    )]
+    )
 
 
 def _apply_transforms(value: object, transforms: list[TransformSpec]) -> object:

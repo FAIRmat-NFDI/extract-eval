@@ -58,13 +58,14 @@ def build_record_result(
 ) -> RecordResult:
     """Compute precision, recall, F1 from field results.
 
-    Counting logic (skipped and batch_error fields are present in results for
-    visibility but excluded from all metric calculations):
+    Counting logic (skipped, pending, and batch_error fields are present in
+    results for visibility but excluded from all metric calculations):
     - match/mismatch: contributes to both precision and recall denominators
     - omission (FN): contributes to recall denominator only
     - hallucination (FP): contributes to precision denominator only
     - skipped: excluded from all counts
-    - batch_error: excluded from all counts (judge failed to give a verdict)
+    - pending: excluded from all counts (awaiting batch handler)
+    - batch_error: excluded from all counts (batch handler failed)
     """
     precision_num = 0.0
     precision_den = 0.0
@@ -72,7 +73,7 @@ def build_record_result(
     recall_den = 0.0
 
     for fr in field_results:
-        if fr.status == "skipped" or fr.status == "batch_error":
+        if fr.status in ("skipped", "pending", "batch_error"):
             continue
         if fr.status == "omission":
             recall_den += 1.0
@@ -136,7 +137,7 @@ def build_run_result(records: list[RecordResult]) -> RunResult:
 
     for record in records:
         for fr in record.field_results:
-            if fr.status == "skipped":
+            if fr.status in ("skipped", "pending"):
                 continue
             if fr.status == "batch_error":
                 total_batch_errors += 1
