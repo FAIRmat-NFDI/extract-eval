@@ -13,7 +13,7 @@ Batch comparators (LLM judge, embedding similarity, etc.) are not included
 by default. Register them yourself before calling evaluate():
 
     from struct_extract_eval.core.comparators.registry import register
-    from struct_extract_eval.pipeline import GroqJudge, SemanticBatchComparator
+    from struct_extract_eval.batch import GroqJudge, SemanticBatchComparator
 
     register("semantic", SemanticBatchComparator(GroqJudge()))
     result = evaluate(gold, extracted, schema)
@@ -43,8 +43,8 @@ def _run_evaluation(
     record's batch handlers see only that record's pending fields (matches the
     "one judge call per record" design).
     """
-    # Imported lazily so the core has no hard dependency on the pipeline layer.
-    from struct_extract_eval.pipeline.batch import process_batches
+    # Imported lazily so the core has no hard dependency on the batch layer.
+    from struct_extract_eval.batch.process import process_batches
 
     records = []
     for record_id, g, e in pairs:

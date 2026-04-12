@@ -1,4 +1,4 @@
-"""Tests for the BatchComparator pipeline.
+"""Tests for the BatchComparator subsystem.
 
 Covers:
 - The semantic batch comparator (using FakeJudge -- no network)
@@ -22,12 +22,12 @@ from struct_extract_eval.core.comparators.registry import (
 )
 from struct_extract_eval.core.scoring import FieldResult
 from struct_extract_eval.evaluator import evaluate
-from struct_extract_eval.pipeline import (
+from struct_extract_eval.batch import (
     FakeJudge,
     SemanticBatchComparator,
     process_batches,
 )
-from struct_extract_eval.pipeline.llm_judge import (
+from struct_extract_eval.batch.llm_judge import (
     JudgeItem,
     _coerce_binary_score,
     _parse_judge_response,

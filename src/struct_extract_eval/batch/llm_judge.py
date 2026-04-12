@@ -1,19 +1,19 @@
 """LLM judge clients used by the semantic batch comparator.
 
 This module owns ONLY the LLM-facing interface. The dispatch logic that hooks
-into the scoring pipeline lives in:
+into the scoring layer lives in:
 
-- ``pipeline/semantic_comparator.py`` -- the BatchComparator wrapper
-- ``pipeline/batch.py`` -- the generic process_batches dispatcher
+- ``batch/semantic_comparator.py`` -- the BatchComparator wrapper
+- ``batch/process.py`` -- the generic process_batches dispatcher
 
-The Judge Protocol is intentionally minimal: ``judge_batch(items) -> list[float]``.
-Implementations:
+The Judge Protocol is intentionally minimal:
+``judge_batch(items) -> list[float | None]``. Implementations:
 
-- ``GroqJudge``  -- real client backed by Groq's free API (requires the ``groq``
+- ``GroqJudge`` -- real client backed by Groq's free API (requires the ``groq``
   package and a ``GROQ_API_KEY`` env var)
-- ``FakeJudge``  -- offline, deterministic, used in tests
+- ``FakeJudge`` -- offline, deterministic, used in tests
 
-Both return binary 0.0/1.0 per item, in the same order as the input list.
+Both return positional lists of 0.0, 1.0, or None per item.
 """
 
 import json
@@ -100,7 +100,7 @@ class GroqJudge:
         except ImportError as exc:
             raise ImportError(
                 "GroqJudge requires the 'groq' package. "
-                "Install with: pip install 'struct-extract-eval[pipeline]'"
+                "Install with: pip install 'struct-extract-eval[batch]'"
             ) from exc
 
         self.model = model
