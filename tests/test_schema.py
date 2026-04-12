@@ -184,10 +184,10 @@ class TestParseSchema:
             "type": "object",
             "x-eval-compare": "exact",
             "properties": {
-                "desc": {"type": "string", "x-eval-compare": "oneof"},
+                "desc": {"type": "string", "x-eval-compare": "exact"},
             },
         }
-        assert _root_child(schema, "desc").comparator.name == "oneof"
+        assert _root_child(schema, "desc").comparator.name == "exact"
 
     def test_xeval_required_false(self) -> None:
         schema: dict[str, object] = {

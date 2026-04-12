@@ -1,3 +1,5 @@
+from typing import TypeGuard
+
 from struct_extract_eval.core.comparators.comparator import (
     BatchComparator,
     Comparator,
@@ -43,8 +45,12 @@ def get_comparator(name: str) -> Comparator | BatchComparator:
     raise ComparatorNotFoundError(f"Unknown comparator: '{name}'")
 
 
-def is_batch(fn: object) -> bool:
-    """True if the comparator is a BatchComparator (has is_batch=True attribute)."""
+def is_batch(fn: Comparator | BatchComparator) -> TypeGuard[BatchComparator]:
+    """True if the comparator is a BatchComparator (has is_batch=True attribute).
+
+    Typed as TypeGuard so callers can narrow the union after the check:
+    ``if is_batch(fn): fn(items)  # mypy knows fn is BatchComparator``
+    """
     return getattr(fn, "is_batch", False) is True
 
 

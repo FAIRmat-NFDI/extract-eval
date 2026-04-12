@@ -3,7 +3,7 @@
 Covers:
 - The semantic batch comparator (using FakeJudge -- no network)
 - process_batches dispatch by label, multiple groups, error paths
-- End-to-end via evaluate(judge=...) -- the convenience sugar
+- End-to-end via explicit register(...) + evaluate()
 - A unit-aware QuantityBatchComparator example -- demonstrates non-LLM usage
 """
 
@@ -315,7 +315,7 @@ class TestEvaluateWithSemanticRegistration:
             SemanticBatchComparator(FakeJudge(default_score=0.0)),  # always disagrees
         )
         register(
-            "semantic_lenient",
+            "semantic",
             SemanticBatchComparator(FakeJudge(default_score=1.0)),  # always agrees
         )
 
@@ -323,16 +323,16 @@ class TestEvaluateWithSemanticRegistration:
             "type": "object",
             "properties": {
                 "strict_field": {"type": "string", "x-eval-compare": "semantic_strict"},
-                "lenient_field": {"type": "string", "x-eval-compare": "semantic_lenient"},
+                "semantic_field": {"type": "string", "x-eval-compare": "semantic"},
             },
         }
-        gold = [{"strict_field": "A", "lenient_field": "A"}]
-        extracted = [{"strict_field": "B", "lenient_field": "B"}]
+        gold = [{"strict_field": "A", "semantic_field": "A"}]
+        extracted = [{"strict_field": "B", "semantic_field": "B"}]
 
         result = evaluate(gold, extracted, schema)
         by_path = {r.path: r for r in result.records[0].field_results}
         assert by_path["strict_field"].status == "mismatch"
-        assert by_path["lenient_field"].status == "match"
+        assert by_path["semantic_field"].status == "match"
 
     def test_batch_error_excluded_from_metrics(self) -> None:
         class RaisingJudge:

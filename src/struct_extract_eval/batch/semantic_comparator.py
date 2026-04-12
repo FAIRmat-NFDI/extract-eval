@@ -46,8 +46,9 @@ class SemanticBatchComparator:
 
     is_batch = True
 
-    def __init__(self, judge: Judge):
+    def __init__(self, judge: Judge, name: str = "semantic"):
         self.judge = judge
+        self.name = name
 
     def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
         if not items:
@@ -67,7 +68,7 @@ class SemanticBatchComparator:
             e = item.extracted_compared
             if type(g) is type(e) and g == e:
                 results[i] = ComparatorResult(
-                    score=1.0, comparator="semantic", reason="exact"
+                    score=1.0, comparator=self.name, reason="exact"
                 )
             else:
                 pending.append(JudgeItem(path=item.path, gold=g, extracted=e))
@@ -106,7 +107,7 @@ class SemanticBatchComparator:
                     continue
                 results[idx] = ComparatorResult(
                     score=score,
-                    comparator="semantic",
+                    comparator=self.name,
                     reason="judge match" if score >= 1.0 else "judge mismatch",
                 )
 
