@@ -40,11 +40,9 @@ _EMPTY_TREE = SchemaNode(path="", json_type="object", comparator="")
 
 @pytest.fixture(autouse=True)
 def _clean_registry() -> None:
-    """Reset custom registry and remove any leftover semantic registration."""
+    """Reset custom registry and remove any leftover registration."""
     _clear_registry()
-    _registry.pop("semantic", None)
     yield
-    _clear_registry()
     _registry.pop("semantic", None)
 
 

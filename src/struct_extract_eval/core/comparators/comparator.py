@@ -5,10 +5,10 @@ Two flavors of comparator:
 - ``Comparator`` (per-field): takes one (gold, extracted) pair and returns
   one ``ComparatorResult``. The dispatcher calls it inline during scoring.
 
-- ``BatchComparator`` (many-at-once): takes a list of ``BatchItem`` and returns
-  a list of ``ComparatorResult`` (one per input item, in order). The dispatcher
-  defers fields that use a batch comparator and processes them in a separate
-  pass via ``process_batches``. Use this when:
+- ``BatchComparator`` (many-at-once): takes a list of ``BatchItem`` and
+  returns a positional list of ``ComparatorResult | None`` (one entry per
+  input item). ``None`` means the handler couldn't decide for that item
+  and ``process_batches`` marks it as ``batch_error``. Use this when:
   - Per-call setup is expensive (LLM judge, embedding model, external API)
   - Multiple sibling fields together form one logical value (units, dates with
     timezones, addresses) and the handler groups them by parent path

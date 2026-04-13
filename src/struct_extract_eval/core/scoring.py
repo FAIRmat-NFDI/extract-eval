@@ -26,8 +26,8 @@ class FieldResult:
     """Result of comparing a single field between gold and extracted.
 
     ``pending_batch`` is set when the field's comparator is a BatchComparator.
-    The scoring layer leaves these as a provisional mismatch (score=0.0). A
-    later pass via ``process_batches`` dispatches them to the registered
+    The scoring layer leaves these with ``status="pending"`` and ``score=0.0``.
+    A later pass via ``process_batches`` dispatches them to the registered
     batch handler and updates score/status/reason/pending_batch in place.
 
     ``gold_compared`` and ``extracted_compared`` are the values the comparator
