@@ -85,8 +85,11 @@ class GroqJudge:
     Uses the official ``groq`` Python SDK. Default model is Llama 3.3 70B.
     The API key is read from ``GROQ_API_KEY`` unless passed explicitly.
 
-    Caching: in-memory dict keyed by ``(model, gold_str, extracted_str)``.
-    for already compared pairs, no need to send to the llm again.
+    Caching: in-memory dict keyed by ``(model, path, gold_str, extracted_str)``.
+    The path is included because the prompt tells the LLM to use the field
+    name as context -- the same (gold, extracted) pair at different paths
+    (e.g. ``"method"`` vs ``"description"``) could get different judgments.
+    Cache survives the lifetime of the process only -- no disk persistence.
     """
 
     def __init__(
