@@ -1,4 +1,4 @@
-"""Batch comparator infrastructure: dispatcher, LLM judge clients, and built-in batch comparators."""
+"""Batch comparator infrastructure: dispatcher, LLM judge clients, built-ins."""
 
 from struct_extract_eval.batch.llm_judge import (
     DEFAULT_SYSTEM_PROMPT,

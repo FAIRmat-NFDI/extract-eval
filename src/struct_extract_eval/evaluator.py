@@ -16,7 +16,7 @@ by default. Register them yourself before calling evaluate():
     from struct_extract_eval.batch import GroqJudge, SemanticBatchComparator
 
     register("semantic", SemanticBatchComparator(GroqJudge()))
-    result = evaluate(gold, extracted, schema)
+    result = evaluate(gold, extracted, eval_schema)
 """
 
 from copy import deepcopy
@@ -97,7 +97,7 @@ def evaluate(
     tree = parse_schema(deepcopy(schema))
     pairs: list[tuple[str | int, dict[str, object], dict[str, object]]] = [
         (g[id_field] if id_field else i, g, e)
-        for i, (g, e) in enumerate(zip(gold, extracted))
+        for i, (g, e) in enumerate(zip(gold, extracted, strict=True))
     ]
     return _run_evaluation(pairs, tree)
 

@@ -106,7 +106,10 @@ class GroqJudge:
         self.model = model
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
         self._client = Groq(api_key=api_key or os.environ.get("GROQ_API_KEY"))
-        self._cache: dict[tuple[str, str, str], float] = {} # model, gold_str, extracted_str -> score
+        # Cache key includes path because the prompt tells the LLM to use
+        # the field name as context -- same (gold, extracted) at different
+        # paths could get different judgments.
+        self._cache: dict[tuple[str, str, str, str], float] = {}
 
     def judge_batch(self, items: list[JudgeItem]) -> list[float | None]:
         if not items:
@@ -120,6 +123,7 @@ class GroqJudge:
         for i, item in enumerate(items):
             cache_key = (
                 self.model,
+                item.path,
                 _stringify(item.gold),
                 _stringify(item.extracted),
             )
@@ -142,6 +146,7 @@ class GroqJudge:
                     if score is not None:
                         cache_key = (
                             self.model,
+                            items[idx].path,
                             _stringify(items[idx].gold),
                             _stringify(items[idx].extracted),
                         )

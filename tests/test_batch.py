@@ -7,10 +7,20 @@ Covers:
 - A unit-aware QuantityBatchComparator example -- demonstrates non-LLM usage
 """
 
-from typing import Any
+from typing import ClassVar
 
 import pytest
 
+from struct_extract_eval.batch import (
+    FakeJudge,
+    SemanticBatchComparator,
+    process_batches,
+)
+from struct_extract_eval.batch.llm_judge import (
+    JudgeItem,
+    _coerce_binary_score,
+    _parse_judge_response,
+)
 from struct_extract_eval.core.comparators.comparator import (
     BatchItem,
     ComparatorResult,
@@ -23,17 +33,6 @@ from struct_extract_eval.core.comparators.registry import (
 from struct_extract_eval.core.schema import SchemaNode
 from struct_extract_eval.core.scoring import FieldResult
 from struct_extract_eval.evaluator import evaluate
-from struct_extract_eval.batch import (
-    FakeJudge,
-    SemanticBatchComparator,
-    process_batches,
-)
-from struct_extract_eval.batch.llm_judge import (
-    JudgeItem,
-    _coerce_binary_score,
-    _parse_judge_response,
-)
-
 
 # Minimal empty tree for process_batches tests that don't need real schema params.
 _EMPTY_TREE = SchemaNode(path="", json_type="object", comparator="")
@@ -379,7 +378,7 @@ class QuantityBatchComparator:
 
     is_batch = True
 
-    UNITS_TO_METERS: dict[str, float] = {
+    UNITS_TO_METERS: ClassVar[dict[str, float]] = {
         "m": 1.0, "meter": 1.0, "meters": 1.0,
         "km": 1000.0, "cm": 0.01, "mm": 0.001,
     }
@@ -605,8 +604,6 @@ class TestPositionPreservation:
         # Bug behavior: the second pending item would get the exact[3]'s score,
         # and exact[3] would become batch_error.
         # Correct behavior: pending #2 becomes batch_error; exact[3] stays match.
-
-        judge = FakeJudge(responses={("a", "ax"): 1.0})  # only handles first pending
 
         # Force a short response: this judge returns only 1 entry for 2 inputs
         class ShortJudge:

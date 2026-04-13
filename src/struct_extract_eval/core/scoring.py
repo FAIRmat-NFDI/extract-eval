@@ -88,9 +88,14 @@ def _score_object(
     """Score an object node by iterating its children."""
     results: list[FieldResult] = []
     if not isinstance(gold_value, dict):
-        logger.warning("Expected dict at '%s', got %s in gold", node.path, type(gold_value).__name__)
+        logger.warning(
+            "Expected dict at '%s', got %s in gold", node.path, type(gold_value).__name__
+        )
     if not isinstance(extracted_value, dict):
-        logger.warning("Expected dict at '%s', got %s in extracted", node.path, type(extracted_value).__name__)
+        logger.warning(
+            "Expected dict at '%s', got %s in extracted",
+            node.path, type(extracted_value).__name__,
+        )
     gold_dict = gold_value if isinstance(gold_value, dict) else {}
     extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
 
@@ -139,7 +144,9 @@ def _score_array_ordered(
     gold_is_list = isinstance(gold_value, list)
     extracted_is_list = isinstance(extracted_value, list)
     if not gold_is_list:
-        logger.warning("Expected list at '%s', got %s in gold", node.path, type(gold_value).__name__)
+        logger.warning(
+            "Expected list at '%s', got %s in gold", node.path, type(gold_value).__name__
+        )
     if not extracted_is_list:
         logger.warning(
             "Expected list at '%s', got %s in extracted", node.path, type(extracted_value).__name__
@@ -165,7 +172,8 @@ def _score_array_ordered(
     # Structural failure: at least one side is not a list, and after coercion
     # there are no elements to per-element score. Emit one mismatch for the
     # array node so both precision and recall are penalized.
-    if (not gold_is_list or not extracted_is_list) and len(gold_list) == 0 and len(extracted_list) == 0:
+    both_empty = len(gold_list) == 0 and len(extracted_list) == 0
+    if (not gold_is_list or not extracted_is_list) and both_empty:
         return [FieldResult(
             path=node.path,
             score=0.0,
@@ -235,10 +243,7 @@ def _score_leaf(
     # Per-field comparator: call inline
     result = comparator_fn(gold_transformed, extracted_transformed, node.comparator.params)
 
-    if result.score == 1.0:
-        status = "match"
-    else:
-        status = "mismatch"
+    status = "match" if result.score == 1.0 else "mismatch"
 
     return FieldResult(
         path=node.path,
