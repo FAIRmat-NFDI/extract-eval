@@ -8,19 +8,37 @@ import logging
 from dataclasses import dataclass
 from typing import Literal
 
-from struct_extract_eval.core.comparators.registry import get_comparator
+from struct_extract_eval.core.comparators.registry import get_comparator, is_batch
 from struct_extract_eval.core.schema import SchemaNode
 from struct_extract_eval.core.transforms.registry import get_transform
 from struct_extract_eval.core.transforms.transform import TransformSpec
 
 logger = logging.getLogger(__name__)
 
-FieldStatus = Literal["match", "mismatch", "omission", "hallucination", "skipped"]
+FieldStatus = Literal[
+    "match", "mismatch", "omission", "hallucination", "skipped",
+    "pending", "batch_error",
+]
 
 
 @dataclass
 class FieldResult:
-    """Result of comparing a single field between gold and extracted."""
+    """Result of comparing a single field between gold and extracted.
+
+    ``pending_batch`` is set when the field's comparator is a BatchComparator.
+    The scoring layer leaves these with ``status="pending"`` and ``score=0.0``.
+    A later pass via ``process_batches`` dispatches them to the registered
+    batch handler and updates score/status/reason/pending_batch in place.
+
+    ``gold_compared`` and ``extracted_compared`` are the values the comparator
+    actually saw, after transforms were applied. When there are no transforms,
+    they reference the same objects as ``gold_value`` and ``extracted_value``.
+    These are used by batch handlers so the LLM/embedding/etc. sees the
+    normalized values, not the raw ones.
+
+    ``reason`` carries a short human-readable explanation, propagated from
+    ``ComparatorResult.reason`` (per-field) or set by the batch handler.
+    """
 
     path: str
     score: float
@@ -28,6 +46,10 @@ class FieldResult:
     gold_value: object
     extracted_value: object
     status: FieldStatus
+    reason: str | None = None
+    gold_compared: object | None = None
+    extracted_compared: object | None = None
+    pending_batch: str | None = None
 
 
 def score_record(
@@ -55,7 +77,7 @@ def _score_node(
         return _score_object(node, gold_value, extracted_value)
     if node.json_type == "array" and node.children:
         return _score_array_ordered(node, gold_value, extracted_value)
-    return _score_leaf(node, gold_value, extracted_value)
+    return [_score_leaf(node, gold_value, extracted_value)]
 
 
 def _score_object(
@@ -66,9 +88,14 @@ def _score_object(
     """Score an object node by iterating its children."""
     results: list[FieldResult] = []
     if not isinstance(gold_value, dict):
-        logger.warning("Expected dict at '%s', got %s in gold", node.path, type(gold_value).__name__)
+        logger.warning(
+            "Expected dict at '%s', got %s in gold", node.path, type(gold_value).__name__
+        )
     if not isinstance(extracted_value, dict):
-        logger.warning("Expected dict at '%s', got %s in extracted", node.path, type(extracted_value).__name__)
+        logger.warning(
+            "Expected dict at '%s', got %s in extracted",
+            node.path, type(extracted_value).__name__,
+        )
     gold_dict = gold_value if isinstance(gold_value, dict) else {}
     extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
 
@@ -117,7 +144,9 @@ def _score_array_ordered(
     gold_is_list = isinstance(gold_value, list)
     extracted_is_list = isinstance(extracted_value, list)
     if not gold_is_list:
-        logger.warning("Expected list at '%s', got %s in gold", node.path, type(gold_value).__name__)
+        logger.warning(
+            "Expected list at '%s', got %s in gold", node.path, type(gold_value).__name__
+        )
     if not extracted_is_list:
         logger.warning(
             "Expected list at '%s', got %s in extracted", node.path, type(extracted_value).__name__
@@ -143,7 +172,8 @@ def _score_array_ordered(
     # Structural failure: at least one side is not a list, and after coercion
     # there are no elements to per-element score. Emit one mismatch for the
     # array node so both precision and recall are penalized.
-    if (not gold_is_list or not extracted_is_list) and len(gold_list) == 0 and len(extracted_list) == 0:
+    both_empty = len(gold_list) == 0 and len(extracted_list) == 0
+    if (not gold_is_list or not extracted_is_list) and both_empty:
         return [FieldResult(
             path=node.path,
             score=0.0,
@@ -173,37 +203,59 @@ def _score_leaf(
     node: SchemaNode,
     gold_value: object,
     extracted_value: object,
-) -> list[FieldResult]:
-    """Score a leaf node: apply transforms, then comparator."""
+) -> FieldResult:
+    """Score a leaf node: apply transforms, then dispatch to per-field or batch comparator.
+
+    Returns a single FieldResult. For per-field comparators, the result is final.
+    For batch comparators, the result is provisional (pending_batch set, score=0.0)
+    and process_batches will fill in the real score later.
+    """
     if node.skip:
-        return [FieldResult(
+        return FieldResult(
             path=node.path,
             score=0.0,
             comparator="",
             gold_value=gold_value,
             extracted_value=extracted_value,
             status="skipped",
-        )]
+        )
 
     gold_transformed = _apply_transforms(gold_value, node.transforms)
     extracted_transformed = _apply_transforms(extracted_value, node.transforms)
 
     comparator_fn = get_comparator(node.comparator.name)
+
+    if is_batch(comparator_fn):
+        # Defer: build a provisional FieldResult, mark pending. process_batches
+        # will dispatch this to the registered batch handler later.
+        return FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator=node.comparator.name,
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="pending",
+            gold_compared=gold_transformed,
+            extracted_compared=extracted_transformed,
+            pending_batch=node.comparator.name,
+        )
+
+    # Per-field comparator: call inline
     result = comparator_fn(gold_transformed, extracted_transformed, node.comparator.params)
 
-    if result.score == 1.0:
-        status = "match"
-    else:
-        status = "mismatch"
+    status = "match" if result.score == 1.0 else "mismatch"
 
-    return [FieldResult(
+    return FieldResult(
         path=node.path,
         score=result.score,
         comparator=node.comparator.name,
         gold_value=gold_value,
         extracted_value=extracted_value,
         status=status,
-    )]
+        reason=result.reason,
+        gold_compared=gold_transformed,
+        extracted_compared=extracted_transformed,
+    )
 
 
 def _apply_transforms(value: object, transforms: list[TransformSpec]) -> object:

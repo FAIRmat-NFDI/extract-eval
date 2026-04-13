@@ -1,5 +1,6 @@
 # Struct Extract Eval
 
+
 Domain-agnostic, field-level evaluation for LLM structured JSON extraction.
 
 ## The Problem

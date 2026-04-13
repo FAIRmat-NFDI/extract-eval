@@ -8,20 +8,17 @@ def test_defaults() -> None:
     assert result.score == 1.0
     assert result.comparator == "exact"
     assert result.reason is None
-    assert result.needs_judge is False
 
 
 def test_all_fields() -> None:
     result = ComparatorResult(
         score=0.0,
-        comparator="semantic",
-        reason="deferred to judge",
-        needs_judge=True,
+        comparator="numeric",
+        reason="relative error exceeds 0.01",
     )
     assert result.score == 0.0
-    assert result.comparator == "semantic"
-    assert result.reason == "deferred to judge"
-    assert result.needs_judge is True
+    assert result.comparator == "numeric"
+    assert result.reason == "relative error exceeds 0.01"
 
 
 def test_frozen() -> None:
