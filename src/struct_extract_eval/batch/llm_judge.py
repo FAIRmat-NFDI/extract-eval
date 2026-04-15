@@ -25,26 +25,29 @@ from typing import Protocol
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_SYSTEM_PROMPT = """\
+DEFAULT_PROMPT_TEMPLATE = """\
 You judge whether two values mean the same thing in a JSON extraction task.
-For each numbered pair, decide if the EXTRACTED value is semantically equivalent
-to the GOLD value. Be strict but fair:
+For each numbered pair, decide if the EXTRACTED value is semantically
+equivalent to the GOLD value. Be strict but fair:
 
 - Capitalization, whitespace, and punctuation differences ARE equivalent.
-- Synonyms, abbreviations, and paraphrases ARE equivalent (e.g. "PVD" and
-  "physical vapor deposition", "NYC" and "New York City").
+- Synonyms, abbreviations, and paraphrases ARE equivalent
+  (e.g. "PVD" = "physical vapor deposition", "description: sputter process" = "description": "Standard sputtering procedure.").
 - Different facts, numbers, units, or specifications are NOT equivalent.
 - When in doubt, return 0.
 
-Each pair includes the FIELD path, which tells you what kind of value it is.
-Use the field name as context (e.g. a "method" field vs a "temperature" field
-need different judgment).
+Each pair includes the FIELD path, which tells you what kind of value
+it is. Use the field name as context (e.g. a "method" field vs a
+"temperature" field need different judgment).
+
+Pairs to judge:
+{pairs}
 
 Return STRICT JSON in this exact format and nothing else:
-{"results": [<0 or 1>, <0 or 1>, ...]}
+{{"results": [<0 or 1>, <0 or 1>, ...]}}
 
-The results array MUST have exactly the same number of entries as input pairs,
-in the same order.
+The results array MUST have exactly the same number of entries as
+input pairs, in the same order.
 """
 
 
@@ -96,8 +99,28 @@ class GroqJudge:
         self,
         model: str = "llama-3.3-70b-versatile",
         api_key: str | None = None,
-        system_prompt: str | None = None,
+        prompt_template: str | None = None,
     ):
+        """
+        Args:
+            model: Groq model name.
+            api_key: Groq API key. Falls back to ``GROQ_API_KEY`` env var.
+            prompt_template: The full prompt sent to the LLM. Must contain
+                ``{pairs}`` which gets replaced with the rendered
+                gold/extracted pairs. If None, uses
+                ``DEFAULT_PROMPT_TEMPLATE``. Example::
+
+                    prompt_template=(
+                        "You are a materials science judge.\\n\\n"
+                        "{pairs}\\n\\n"
+                        "PVD and sputtering are synonyms.\\n"
+                        "Return JSON: {{\\\"results\\\": [0 or 1, ...]}}"
+                    )
+
+                Note: literal braces in the template must be doubled
+                (``{{`` / ``}}``) because ``.format()`` uses ``{...}``
+                for placeholders.
+        """
         try:
             from groq import Groq  # type: ignore[import-not-found]
         except ImportError as exc:
@@ -107,7 +130,7 @@ class GroqJudge:
             ) from exc
 
         self.model = model
-        self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self.prompt_template = prompt_template or DEFAULT_PROMPT_TEMPLATE
         self._client = Groq(api_key=api_key or os.environ.get("GROQ_API_KEY"))
         # Cache key includes path because the prompt tells the LLM to use
         # the field name as context -- same (gold, extracted) at different
@@ -167,13 +190,11 @@ class GroqJudge:
         response is unparseable, returns an empty list. If individual items
         come back with invalid values (e.g. 0.5), those positions are None.
         """
-        user_prompt = _render_pairs(items)
+        pairs_text = _render_pairs(items)
+        prompt = self.prompt_template.format(pairs=pairs_text)
         response = self._client.chat.completions.create(
             model=self.model,
-            messages=[
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.0,
         )
@@ -236,12 +257,12 @@ def _stringify(value: object) -> str:
 
 
 def _render_pairs(items: list[JudgeItem]) -> str:
-    """Format items as a numbered list for the user prompt.
+    """Format items as a numbered list.
 
-    Includes the field path so the LLM has context about what kind of value
-    each pair represents.
+    Pure data rendering -- no header like "Pairs to judge:". Any framing
+    text belongs in the prompt template, not here.
     """
-    lines = ["Pairs to judge:"]
+    lines: list[str] = []
     for i, item in enumerate(items, start=1):
         lines.append(
             f"{i}. field={item.path!r} "
