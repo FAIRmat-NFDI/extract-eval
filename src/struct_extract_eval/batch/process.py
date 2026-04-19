@@ -153,6 +153,7 @@ def process_batches(
         # - ComparatorResult: success, apply score+status
         # - None: per-item failure, mark this field as batch_error (not the rest)
         # - anything else: invalid handler return type, mark as batch_error
+        # field_result is updated in place, FieldResult must be mutable, (not frozen=True)
         for i, r in enumerate(results):
             if i >= len(outputs):
                 # Short list: trailing items get batch_error
