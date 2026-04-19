@@ -32,7 +32,7 @@ equivalent to the GOLD value. Be strict but fair:
 
 - Capitalization, whitespace, and punctuation differences ARE equivalent.
 - Synonyms, abbreviations, and paraphrases ARE equivalent
-  (e.g. "PVD" = "physical vapor deposition", "description: sputter process" = "description": "Standard sputtering procedure.").
+  (e.g. "PVD" = "physical vapor deposition", "sputter process" = "standard sputtering procedure").
 - Different facts, numbers, units, or specifications are NOT equivalent.
 - When in doubt, return 0.
 
@@ -131,6 +131,11 @@ class GroqJudge:
 
         self.model = model
         self.prompt_template = prompt_template or DEFAULT_PROMPT_TEMPLATE
+        if "{pairs}" not in self.prompt_template:
+            raise ValueError(
+                "prompt_template must contain a '{pairs}' placeholder "
+                "for the rendered gold/extracted pairs"
+            )
         self._client = Groq(api_key=api_key or os.environ.get("GROQ_API_KEY"))
         # Cache key includes path because the prompt tells the LLM to use
         # the field name as context -- same (gold, extracted) at different

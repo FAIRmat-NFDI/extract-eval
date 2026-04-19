@@ -14,8 +14,6 @@ Requires:
 """
 
 import json
-import os
-from copy import deepcopy
 
 from struct_extract_eval import (
     evaluate,
@@ -167,7 +165,7 @@ def main() -> None:
     print("Gold validation passed.")
 
     # ------------------------------------------------------------------
-    # 6. Register semantic batch comparator (FakeJudge, no network)
+    # 6. Register semantic batch comparator (GroqJudge)
     # ------------------------------------------------------------------
     _section("Step 5: Register semantic comparator (GroqJudge)")
 
