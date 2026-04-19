@@ -194,7 +194,7 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
         transforms=transforms,
     )
     if "x-eval-required" in schema:
-        node.required = bool(schema["x-eval-required"])
+        node.required = schema["x-eval-required"]
     if schema.get("x-eval-skip"):
         node.skip = True
     return node
