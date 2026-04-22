@@ -33,6 +33,7 @@ _KNOWN_XEVAL_KEYS = frozenset(
         "x-eval-compare",
         "x-eval-transform",
         "x-eval-skip",
+        "x-eval-align",
     }
 )
 
@@ -57,6 +58,8 @@ class SchemaNode:
     required: bool = True
     skip: bool = False
     transforms: list[TransformSpec] = field(default_factory=list)
+    # Array-only. None for leaf and object nodes.
+    align: dict[str, object] | None = None
 
 
 def _validate_xeval(schema: dict[str, object], path: str) -> None:
@@ -75,6 +78,21 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
 
     if "x-eval-skip" in schema and not isinstance(schema["x-eval-skip"], bool):
         raise SchemaError("x-eval-skip must be a boolean", path)
+
+    if "x-eval-align" in schema:
+        raw_align = schema["x-eval-align"]
+        if not isinstance(raw_align, dict):
+            raise SchemaError("x-eval-align must be a dict", path)
+        if "ordered" not in raw_align and "match_by" not in raw_align:
+            raise SchemaError(
+                "x-eval-align must have 'ordered' or 'match_by' key", path
+            )
+        match_by = raw_align.get("match_by")
+        if match_by == "key_field" and "key" not in raw_align:
+            raise SchemaError(
+                "x-eval-align with match_by='key_field' requires a 'key'",
+                path,
+            )
 
     if "x-eval-compare" in schema:
         raw_compare = schema["x-eval-compare"]
@@ -197,6 +215,8 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
         node.required = schema["x-eval-required"]
     if schema.get("x-eval-skip"):
         node.skip = True
+    if "x-eval-align" in schema:
+        node.align = schema["x-eval-align"]
     return node
 
 

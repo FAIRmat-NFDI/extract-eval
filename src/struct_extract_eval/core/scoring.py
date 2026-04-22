@@ -76,7 +76,7 @@ def _score_node(
     if node.json_type == "object" and node.children:
         return _score_object(node, gold_value, extracted_value)
     if node.json_type == "array" and node.children:
-        return _score_array_ordered(node, gold_value, extracted_value)
+        return _score_array(node, gold_value, extracted_value)
     return [_score_leaf(node, gold_value, extracted_value)]
 
 
@@ -132,6 +132,36 @@ def _score_object(
             results.extend(_hallucination_results(child, extracted_dict[field_name]))
 
     return results
+
+
+def _score_array(
+    node: SchemaNode,
+    gold_value: object,
+    extracted_value: object,
+) -> list[FieldResult]:
+    """Dispatch to the appropriate array scoring strategy based on node.align."""
+    align = node.align
+    if align is None or align.get("ordered"):
+        return _score_array_ordered(node, gold_value, extracted_value)
+    match_by = align.get("match_by")
+    if match_by == "key_field":
+        return _score_array_key_field(
+            node, gold_value, extracted_value, key=str(align["key"])
+        )
+    if match_by == "hungarian":
+        # TODO: implement Hungarian bipartite matching
+        logger.warning(
+            "Hungarian alignment at '%s' is not yet implemented. "
+            "Falling back to ordered matching.",
+            node.path,
+        )
+        return _score_array_ordered(node, gold_value, extracted_value)
+    logger.warning(
+        "Unknown x-eval-align match_by='%s' at '%s'. "
+        "Falling back to ordered matching.",
+        match_by, node.path,
+    )
+    return _score_array_ordered(node, gold_value, extracted_value)
 
 
 def _score_array_ordered(
@@ -195,6 +225,105 @@ def _score_array_ordered(
     # Extra extracted elements: hallucinations
     for i in range(matched_count, len(extracted_list)):
         results.extend(_hallucination_results(items_node, extracted_list[i]))
+
+    return results
+
+
+def _score_array_key_field(
+    node: SchemaNode,
+    gold_value: object,
+    extracted_value: object,
+    key: str,
+) -> list[FieldResult]:
+    """Score an array using key-field alignment.
+
+    Matches gold and extracted elements by the value of a shared key field
+    (e.g. "name"). Order doesn't matter. Elements with the same key value
+    are paired and scored recursively. Unmatched gold elements produce
+    omissions; unmatched extracted elements produce hallucinations.
+
+    If gold or extracted is not a list, coerces to [] with a warning
+    (same as _score_array_ordered).
+    """
+    results: list[FieldResult] = []
+    gold_is_list = isinstance(gold_value, list)
+    extracted_is_list = isinstance(extracted_value, list)
+    if not gold_is_list:
+        logger.warning(
+            "Expected list at '%s', got %s in gold",
+            node.path, type(gold_value).__name__,
+        )
+    if not extracted_is_list:
+        logger.warning(
+            "Expected list at '%s', got %s in extracted",
+            node.path, type(extracted_value).__name__,
+        )
+    gold_list = gold_value if gold_is_list else []
+    extracted_list = extracted_value if extracted_is_list else []
+    items_node = node.children[0]
+
+    # Both empty: array-level match (same rule as _score_array_ordered)
+    if (
+        gold_is_list
+        and extracted_is_list
+        and len(gold_list) == 0
+        and len(extracted_list) == 0
+    ):
+        return [FieldResult(
+            path=node.path,
+            score=1.0,
+            comparator="",
+            gold_value=[],
+            extracted_value=[],
+            status="match",
+        )]
+
+    # Structural failure: same rule as _score_array_ordered
+    both_empty = len(gold_list) == 0 and len(extracted_list) == 0
+    if (not gold_is_list or not extracted_is_list) and both_empty:
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="mismatch",
+        )]
+
+    # Build lookup: key_value -> element for extracted
+    extracted_by_key: dict[object, dict[str, object]] = {}
+    extracted_unmatched: list[object] = []
+    for elem in extracted_list:
+        if isinstance(elem, dict) and key in elem:
+            k = elem[key]
+            extracted_by_key[k] = elem
+        else:
+            extracted_unmatched.append(elem)
+
+    # todo check key unique first...
+
+    matched_keys: set[object] = set()
+
+    for gold_elem in gold_list:
+        if not isinstance(gold_elem, dict) or key not in gold_elem:
+            results.extend(_omission_results(items_node, gold_elem))
+            continue
+        k = gold_elem[key]
+        if k in extracted_by_key and k not in matched_keys:
+            matched_keys.add(k)
+            results.extend(
+                _score_node(items_node, gold_elem, extracted_by_key[k])
+            )
+        else:
+            results.extend(_omission_results(items_node, gold_elem))
+
+    for k, elem in extracted_by_key.items():
+        if k not in matched_keys:
+            results.extend(_hallucination_results(items_node, elem))
+
+    # Extracted elements that had no key field at all — hallucinations
+    for elem in extracted_unmatched:
+        results.extend(_hallucination_results(items_node, elem))
 
     return results
 
