@@ -102,9 +102,6 @@ def _score_object(
     for child in node.children:
         # Extract field name from path: "experiment.name" -> "name"
         field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
-        if field_name == "[]":
-            # Array items node -- handled by _score_array_ordered on the parent
-            continue
 
         # Skip fields are included in results for visibility but excluded
         # from all metric calculations (precision, recall, F1, total_fields).
