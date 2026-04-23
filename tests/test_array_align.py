@@ -155,9 +155,9 @@ class TestKeyFieldAlignment:
         }
         results = score_record(schema, gold, extracted)
         assert all(r.status == "match" for r in results)
-        assert len(results) == 4  # 2 elements x 2 fields
+        assert len(results) == 4  # two names, two temps
 
-    def test_ordered_would_mismatch_same_data(self) -> None:
+    def test_ordered_mismatch_same_data(self) -> None:
         # Same data as above, but with ordered matching: different order = mismatch
         schema = _make_schema(_steps_schema())  # no align = ordered
         gold = {
@@ -247,12 +247,13 @@ class TestKeyFieldAlignment:
         extracted = {"steps": [{"name": "anneal", "temp": 500}]}
         results = score_record(schema, gold, extracted)
         hallucinations = [r for r in results if r.status == "hallucination"]
-        assert len(hallucinations) == 2  # name + temp
+        assert len(hallucinations) == 2
 
-    def test_extracted_element_missing_key_is_hallucination(self) -> None:
-        # Extracted has an element without the key field — can't match, so
-        # _hallucination_results recurses into the items schema and emits
-        # one hallucination per leaf (name + temp).
+    def test_extracted_element_missing_key_hallucination(self) -> None:
+        # Extracted has an element without the key field — can't match.
+        # Only actually-present fields in the extra element count as
+        # hallucinations. The missing "name" is not hallucinated because
+        # the extractor didn't produce it.
         schema = _make_schema(
             _steps_schema({"match_by": "key_field", "key": "name"})
         )
@@ -265,8 +266,9 @@ class TestKeyFieldAlignment:
         matches = [r for r in results if r.status == "match"]
         hallucinations = [r for r in results if r.status == "hallucination"]
         assert len(matches) == 2  # anneal.name + anneal.temp
-        assert len(hallucinations) == 2  # keyless element: name + temp
+        assert len(hallucinations) == 1  # only temp (name not produced)
 
+    # todo test this case later with hangarian match
     def test_duplicate_keys_in_extracted(self) -> None:
         # Two extracted elements share the same key. First wins the match;
         # the duplicate is treated as an unmatched hallucination.
@@ -276,13 +278,35 @@ class TestKeyFieldAlignment:
         gold = {"steps": [{"name": "anneal", "temp": 500}]}
         extracted = {"steps": [
             {"name": "anneal", "temp": 500},
-            {"name": "anneal", "temp": 999},  # duplicate key
+            {"name": "anneal", "temp": 999},  # duplicate key,
         ]}
         results = score_record(schema, gold, extracted)
         matches = [r for r in results if r.status == "match"]
         hallucinations = [r for r in results if r.status == "hallucination"]
         assert len(matches) == 2  # first anneal matched
         assert len(hallucinations) == 2  # duplicate anneal: name + temp
+
+    def test_duplicate_keys_in_extracted_order_matters(self) -> None:
+        # Same as test_duplicate_keys_in_extracted but with extracted order
+        # swapped. The FIRST extracted element with key "anneal" wins the
+        # lookup slot. Here the first has temp=999 which mismatches gold's
+        # temp=500, while the second (temp=500) would have matched perfectly
+        # — but it's treated as a duplicate and becomes a hallucination.
+        schema = _make_schema(
+            _steps_schema({"match_by": "key_field", "key": "name"})
+        )
+        gold = {"steps": [{"name": "anneal", "temp": 500}]}
+        extracted = {"steps": [
+            {"name": "anneal", "temp": 999},  # first: wins lookup, but temp mismatches
+            {"name": "anneal", "temp": 500},  # second: would match, but duplicate
+        ]}
+        results = score_record(schema, gold, extracted)
+        matches = [r for r in results if r.status == "match"]
+        mismatches = [r for r in results if r.status == "mismatch"]
+        hallucinations = [r for r in results if r.status == "hallucination"]
+        assert len(matches) == 1      # name matched
+        assert len(mismatches) == 1   # temp: 999 vs 500
+        assert len(hallucinations) == 2  # duplicate element: name + temp
 
     def test_duplicate_keys_in_gold(self) -> None:
         # Two gold elements share the same key. First matches; the second
@@ -300,6 +324,45 @@ class TestKeyFieldAlignment:
         omissions = [r for r in results if r.status == "omission"]
         assert len(matches) == 2  # first anneal matched
         assert len(omissions) == 2  # second anneal: name + temp
+
+    def test_duplicate_keys_in_gold_order_matters(self) -> None:
+        # Same as test_duplicate_keys_in_gold but with gold order swapped.
+        # The FIRST gold element with key "anneal" wins the match.
+        # Here the first has temp=600 which mismatches extracted's temp=500,
+        # while the second (temp=500) would have matched perfectly — but it
+        # loses because the first element already consumed the key.
+        # This demonstrates that gold order affects results with duplicate keys.
+        schema = _make_schema(
+            _steps_schema({"match_by": "key_field", "key": "name"})
+        )
+        gold = {"steps": [
+            {"name": "anneal", "temp": 600},  # first: wins match, but temp mismatches
+            {"name": "anneal", "temp": 500},  # second: would match, but key consumed
+        ]}
+        extracted = {"steps": [{"name": "anneal", "temp": 500}]}
+        results = score_record(schema, gold, extracted)
+        matches = [r for r in results if r.status == "match"]
+        mismatches = [r for r in results if r.status == "mismatch"]
+        omissions = [r for r in results if r.status == "omission"]
+        assert len(matches) == 1    # name matched
+        assert len(mismatches) == 1  # temp: 600 vs 500
+        assert len(omissions) == 2  # second anneal: name + temp
+
+    # todo: strange case, to be discussed!
+    def test_gold_element_missing_field_omission_only_present(self) -> None:
+        # Gold element has only "temp" (no "name"). The element is unmatched
+        # (missing key → omission). Only the actually-present "temp" should
+        # be an omission — the absent "name" can't be omitted.
+        schema = _make_schema(
+            _steps_schema({"match_by": "key_field", "key": "name"})
+        )
+        gold = {"steps": [{"temp": 500}]}  # no "name" key
+        extracted = {"steps": [{"name": "anneal", "temp": 500}]}
+        results = score_record(schema, gold, extracted)
+        omissions = [r for r in results if r.status == "omission"]
+        hallucinations = [r for r in results if r.status == "hallucination"]
+        assert len(omissions) == 1  # only temp (name not in gold)
+        assert len(hallucinations) == 2  # anneal unmatched: name + temp
 
     def test_end_to_end_via_evaluate(self) -> None:
         raw_schema = _steps_schema(
@@ -323,9 +386,8 @@ class TestKeyFieldAlignment:
             }
         ]
         result = evaluate(gold, extracted, raw_schema)
-        # All fields match despite reversed order
         assert result.mean_f1 == 1.0
-        assert result.total_fields == 4  # 2 elements x 2 fields
+        assert result.total_fields == 4
 
 
 # --- Explicit ordered ---

@@ -345,7 +345,15 @@ def _score_array_matched_by_key_field(
             )
             results.extend(_omission_results(items_node, gold_elem))
             continue
-        if k in extracted_by_key and k not in matched_keys:
+        if k in matched_keys:
+            # Duplicate key in gold — first already consumed the match
+            logger.warning(
+                "Duplicate key '%s'=%r in gold at '%s'. "
+                "Only the first occurrence is matched.",
+                key, k, node.path,
+            )
+            results.extend(_omission_results(items_node, gold_elem))
+        elif k in extracted_by_key:
             # Matched pair: score recursively
             matched_keys.add(k)
             results.extend(
@@ -438,10 +446,11 @@ def _apply_transforms(value: object, transforms: list[TransformSpec]) -> object:
 
 
 def _omission_results(node: SchemaNode, gold_value: object = None) -> list[FieldResult]:
-    """Generate omission FieldResults for all leaves under a missing node.
+    """Generate omission FieldResults for leaves under a missing node.
 
     Can be called on any node, not just leaves. For object nodes, recurses
-    into all children so every leaf in the subtree is marked as an omission.
+    only into children that are actually PRESENT in the gold dict -- you
+    can't omit a field that gold didn't have.
     For array nodes, emits one omission per gold element; if the gold array
     is empty (or a non-list coerced to empty) while extracted is missing the
     field entirely, emits a single omission for the array node itself.
@@ -451,14 +460,16 @@ def _omission_results(node: SchemaNode, gold_value: object = None) -> list[Field
     if node.json_type == "object" and node.children:
         if gold_value is not None and not isinstance(gold_value, dict):
             logger.warning(
-                "Expected dict at '%s', got %s in gold", node.path, type(gold_value).__name__
+                "Expected dict at '%s', got %s in gold",
+                node.path, type(gold_value).__name__,
             )
         gold_dict = gold_value if isinstance(gold_value, dict) else {}
         results: list[FieldResult] = []
         for child in node.children:
             field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
-            child_gold = gold_dict.get(field_name)
-            results.extend(_omission_results(child, child_gold))
+            if field_name not in gold_dict:
+                continue  # can't omit what gold didn't have
+            results.extend(_omission_results(child, gold_dict[field_name]))
         return results
     if node.json_type == "array" and node.children:
         if gold_value is not None and not isinstance(gold_value, list):
@@ -497,7 +508,8 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
     """Generate hallucination FieldResults for extra extracted elements.
 
     Can be called on any node, not just leaves. For object nodes, recurses
-    into all children so every leaf in the subtree is marked as a hallucination.
+    only into children that are actually PRESENT in the extracted dict --
+    you can't hallucinate a field the extractor didn't produce.
     For array nodes, emits one hallucination per extracted element; if the
     extracted array is empty (or a non-list coerced to empty) while gold is
     missing the field entirely, emits a single hallucination for the array
@@ -516,8 +528,9 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
         extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
         for child in node.children:
             field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
-            child_value = extracted_dict.get(field_name)
-            results.extend(_hallucination_results(child, child_value))
+            if field_name not in extracted_dict:
+                continue  # can't hallucinate what wasn't produced, for example, extracted[{"a":1, "b":2}, {"a":3, "b":4}], gold[{"b":2}], there are 3 hallucination
+            results.extend(_hallucination_results(child, extracted_dict[field_name]))
         return results
     if node.json_type == "array" and node.children:
         if extracted_value is not None and not isinstance(extracted_value, list):
