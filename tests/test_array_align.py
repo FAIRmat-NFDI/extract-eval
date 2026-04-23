@@ -250,22 +250,56 @@ class TestKeyFieldAlignment:
         assert len(hallucinations) == 2  # name + temp
 
     def test_extracted_element_missing_key_is_hallucination(self) -> None:
-        # Extracted has an element without the key field — can't match anyone
+        # Extracted has an element without the key field — can't match, so
+        # _hallucination_results recurses into the items schema and emits
+        # one hallucination per leaf (name + temp).
         schema = _make_schema(
             _steps_schema({"match_by": "key_field", "key": "name"})
         )
         gold = {"steps": [{"name": "anneal", "temp": 500}]}
         extracted = {"steps": [
             {"name": "anneal", "temp": 500},
-            {"temp": 999},  # no "name" key — unmatched
+            {"temp": 999},  # no "name" key — unmatched extra element
         ]}
         results = score_record(schema, gold, extracted)
         matches = [r for r in results if r.status == "match"]
         hallucinations = [r for r in results if r.status == "hallucination"]
-        assert len(matches) == 2  # anneal matched
-        # The keyless element has 2 leaves (name omission + temp hallucination)
-        # but _hallucination_results recurses into items schema
-        assert len(hallucinations) >= 1
+        assert len(matches) == 2  # anneal.name + anneal.temp
+        assert len(hallucinations) == 2  # keyless element: name + temp
+
+    def test_duplicate_keys_in_extracted(self) -> None:
+        # Two extracted elements share the same key. First wins the match;
+        # the duplicate is treated as an unmatched hallucination.
+        schema = _make_schema(
+            _steps_schema({"match_by": "key_field", "key": "name"})
+        )
+        gold = {"steps": [{"name": "anneal", "temp": 500}]}
+        extracted = {"steps": [
+            {"name": "anneal", "temp": 500},
+            {"name": "anneal", "temp": 999},  # duplicate key
+        ]}
+        results = score_record(schema, gold, extracted)
+        matches = [r for r in results if r.status == "match"]
+        hallucinations = [r for r in results if r.status == "hallucination"]
+        assert len(matches) == 2  # first anneal matched
+        assert len(hallucinations) == 2  # duplicate anneal: name + temp
+
+    def test_duplicate_keys_in_gold(self) -> None:
+        # Two gold elements share the same key. First matches; the second
+        # can't match anyone (extracted already consumed) -> omission.
+        schema = _make_schema(
+            _steps_schema({"match_by": "key_field", "key": "name"})
+        )
+        gold = {"steps": [
+            {"name": "anneal", "temp": 500},
+            {"name": "anneal", "temp": 600},  # duplicate key
+        ]}
+        extracted = {"steps": [{"name": "anneal", "temp": 500}]}
+        results = score_record(schema, gold, extracted)
+        matches = [r for r in results if r.status == "match"]
+        omissions = [r for r in results if r.status == "omission"]
+        assert len(matches) == 2  # first anneal matched
+        assert len(omissions) == 2  # second anneal: name + temp
 
     def test_end_to_end_via_evaluate(self) -> None:
         raw_schema = _steps_schema(

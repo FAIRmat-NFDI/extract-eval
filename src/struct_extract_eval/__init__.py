@@ -12,7 +12,7 @@ from struct_extract_eval.core.scoring import FieldResult, score_record
 from struct_extract_eval.core.transforms.transform import TransformSpec
 from struct_extract_eval.core.validation import GoldValidationError, validate_gold
 from struct_extract_eval.core.xeval import add_default_xeval, parse_xeval_entry
-from struct_extract_eval.evaluator import evaluate, generate_eval_schema
+from struct_extract_eval.evaluator import evaluate
 
 __all__ = [
     "ComparatorSpec",
@@ -25,7 +25,6 @@ __all__ = [
     "TransformSpec",
     "add_default_xeval",
     "evaluate",
-    "generate_eval_schema",
     "infer_schema",
     "parse_schema",
     "parse_xeval_entry",

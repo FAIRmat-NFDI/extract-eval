@@ -87,12 +87,36 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
             raise SchemaError(
                 "x-eval-align must have 'ordered' or 'match_by' key", path
             )
-        match_by = raw_align.get("match_by")
-        if match_by == "key_field" and "key" not in raw_align:
+        if "ordered" in raw_align and not isinstance(raw_align["ordered"], bool):
             raise SchemaError(
-                "x-eval-align with match_by='key_field' requires a 'key'",
-                path,
+                "x-eval-align 'ordered' must be a boolean", path
             )
+        match_by = raw_align.get("match_by")
+        if match_by is not None:
+            if not isinstance(match_by, str) or not match_by:
+                raise SchemaError(
+                    "x-eval-align 'match_by' must be a non-empty string",
+                    path,
+                )
+            _VALID_MATCH_BY = {"key_field", "hungarian"}
+            if match_by not in _VALID_MATCH_BY:
+                raise SchemaError(
+                    f"x-eval-align 'match_by' must be one of "
+                    f"{sorted(_VALID_MATCH_BY)}, got {match_by!r}",
+                    path,
+                )
+        if match_by == "key_field":
+            if "key" not in raw_align:
+                raise SchemaError(
+                    "x-eval-align with match_by='key_field' "
+                    "requires a 'key'",
+                    path,
+                )
+            if not isinstance(raw_align["key"], str) or not raw_align["key"]:
+                raise SchemaError(
+                    "x-eval-align 'key' must be a non-empty string",
+                    path,
+                )
 
     if "x-eval-compare" in schema:
         raw_compare = schema["x-eval-compare"]
@@ -216,7 +240,10 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
     if schema.get("x-eval-skip"):
         node.skip = True
     if "x-eval-align" in schema:
-        node.align = schema["x-eval-align"]
+        # Validation already confirmed it's a dict
+        raw_align = schema["x-eval-align"]
+        assert isinstance(raw_align, dict)  # for mypy
+        node.align = raw_align
     return node
 
 

@@ -1,7 +1,9 @@
 """Content scoring: walk SchemaNode tree with gold + extracted, produce per-field scores.
 
-Supports flat objects, nested objects, and ordered arrays.
-Unordered array alignment (Hungarian/key-field) is not yet implemented.
+Supports flat objects, nested objects, and arrays (ordered and unordered).
+Array alignment strategies are controlled by ``x-eval-align`` on the array
+node. Default is ordered (positional). Key-field alignment matches elements
+by a unique identifier field. Hungarian bipartite matching is planned.
 """
 
 import logging
@@ -139,13 +141,19 @@ def _score_array(
     gold_value: object,
     extracted_value: object,
 ) -> list[FieldResult]:
-    """Dispatch to the appropriate array scoring strategy based on node.align."""
+    """Dispatch to the appropriate array scoring strategy based on node.align.
+
+    Supports ordered (positional) and unordered matching. For unordered,
+    key-field alignment matches elements by a unique identifier field.
+    Hungarian bipartite matching (highest-score pairing) is planned but
+    not yet implemented -- falls back to ordered with a warning.
+    """
     align = node.align
-    if align is None or align.get("ordered"):
+    if align is None or align.get("ordered") is True:
         return _score_array_ordered(node, gold_value, extracted_value)
     match_by = align.get("match_by")
     if match_by == "key_field":
-        return _score_array_key_field(
+        return _score_array_matched_by_key_field(
             node, gold_value, extracted_value, key=str(align["key"])
         )
     if match_by == "hungarian":
@@ -229,7 +237,7 @@ def _score_array_ordered(
     return results
 
 
-def _score_array_key_field(
+def _score_array_matched_by_key_field(
     node: SchemaNode,
     gold_value: object,
     extracted_value: object,
@@ -290,38 +298,70 @@ def _score_array_key_field(
             status="mismatch",
         )]
 
-    # Build lookup: key_value -> element for extracted
-    extracted_by_key: dict[object, dict[str, object]] = {}
+    # Build lookup: key_value -> first element for extracted.
+    # Duplicate keys in extracted: first occurrence wins the match,
+    # subsequent duplicates are treated as unmatched (hallucinations).
+    extracted_by_key: dict[str | int | float | bool, object] = {}
     extracted_unmatched: list[object] = []
     for elem in extracted_list:
-        if isinstance(elem, dict) and key in elem:
-            k = elem[key]
-            extracted_by_key[k] = elem
-        else:
+        if not isinstance(elem, dict) or key not in elem:
             extracted_unmatched.append(elem)
+            continue
+        k = elem[key]
+        if not isinstance(k, (str, int, float, bool)):
+            # Unhashable or non-primitive key value — can't match
+            logger.warning(
+                "Key field '%s' at '%s' has unhashable value %s. "
+                "Element treated as unmatched.",
+                key, node.path, type(k).__name__,
+            )
+            extracted_unmatched.append(elem)
+            continue
+        if k in extracted_by_key:
+            # Duplicate key — first wins, rest are unmatched
+            logger.warning(
+                "Duplicate key '%s'=%r in extracted at '%s'. "
+                "Only the first occurrence is matched.",
+                key, k, node.path,
+            )
+            extracted_unmatched.append(elem)
+            continue
+        extracted_by_key[k] = elem
 
-    # todo check key unique first...
+    matched_keys: set[str | int | float | bool] = set()
 
-    matched_keys: set[object] = set()
-
+    # Match gold elements against extracted by key
     for gold_elem in gold_list:
         if not isinstance(gold_elem, dict) or key not in gold_elem:
+            # Gold element missing the key field — omission
             results.extend(_omission_results(items_node, gold_elem))
             continue
         k = gold_elem[key]
+        if not isinstance(k, (str, int, float, bool)):
+            logger.warning(
+                "Key field '%s' at '%s' has unhashable value %s in gold. "
+                "Element treated as unmatched.",
+                key, node.path, type(k).__name__,
+            )
+            results.extend(_omission_results(items_node, gold_elem))
+            continue
         if k in extracted_by_key and k not in matched_keys:
+            # Matched pair: score recursively
             matched_keys.add(k)
             results.extend(
                 _score_node(items_node, gold_elem, extracted_by_key[k])
             )
         else:
+            # No match in extracted — omission
             results.extend(_omission_results(items_node, gold_elem))
 
+    # Unmatched extracted elements (key not in gold) — hallucinations
     for k, elem in extracted_by_key.items():
         if k not in matched_keys:
             results.extend(_hallucination_results(items_node, elem))
 
-    # Extracted elements that had no key field at all — hallucinations
+    # Extracted elements without the key field or with
+    # unhashable/duplicate keys — hallucinations
     for elem in extracted_unmatched:
         results.extend(_hallucination_results(items_node, elem))
 
