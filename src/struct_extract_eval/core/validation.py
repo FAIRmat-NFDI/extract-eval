@@ -76,8 +76,6 @@ def _validate_node(
             )
         for child in node.children:
             field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
-            if field_name == "[]": # array items node, skip (validated at parent array node), for example, "tags" is an array field, its child node has path "tags.[]", we skip validating "[]" against gold since it's not a real field in gold, the actual field is "tags" which will be validated at the parent node.
-                continue
             if field_name not in gold_value:
                 if child.required:
                     raise GoldValidationError(
