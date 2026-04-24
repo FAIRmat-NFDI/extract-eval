@@ -184,7 +184,7 @@ This produces an eval schema with defaults:
 
 `add_default_xeval()` removes the `required` array from the resolved schema (the eval schema doesn't use it -- scoring depends on what gold contains, not on required flags).
 
-Default comparators are assigned by type (see [`_default_comparator`](src/struct_extract_eval/xeval.py#L46) for the
+Default comparators are assigned by type (see [`_default_comparator`](src/struct_extract_eval/core/xeval.py#L46) for the
 exact rules):
 
 | Field type               | Default comparator |
