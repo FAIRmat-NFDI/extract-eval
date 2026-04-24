@@ -15,7 +15,7 @@ from struct_extract_eval.core.xeval import add_default_xeval
 from struct_extract_eval.evaluator import evaluate
 
 
-def _make_schema(raw: dict[str, object]) -> "SchemaNode":  # noqa: F821
+def _make_schema(raw: dict[str, object]) -> "SchemaNode":
     add_default_xeval(raw)
     return parse_schema(raw)
 

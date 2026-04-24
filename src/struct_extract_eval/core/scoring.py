@@ -308,7 +308,7 @@ def _score_array_matched_by_key_field(
             extracted_unmatched.append(elem)
             continue
         k = elem[key]
-        if not isinstance(k, (str, int, float)):
+        if isinstance(k, bool) or not isinstance(k, (str, int, float)):
             # Unhashable, non-primitive, or bool key value — can't match.
             # bool is excluded because True == 1 and False == 0 in Python,
             # which causes silent key collisions in the lookup dict.
@@ -339,7 +339,7 @@ def _score_array_matched_by_key_field(
             results.extend(_omission_results(items_node, gold_elem))
             continue
         k = gold_elem[key]
-        if not isinstance(k, (str, int, float)):
+        if isinstance(k, bool) or not isinstance(k, (str, int, float)):
             logger.warning(
                 "Key field '%s' at '%s' has non-matchable value %r (%s) "
                 "in gold. Element treated as unmatched.",
