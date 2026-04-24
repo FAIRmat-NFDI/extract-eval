@@ -34,7 +34,6 @@ class TestSchemaNode:
         node = SchemaNode(path="", json_type="object", comparator=ComparatorSpec("exact"))
         assert node.children == []
         assert node.transforms == []
-        assert node.required is True
         assert node.comparator.params == {}
 
 
@@ -47,15 +46,10 @@ class TestSchemaNode:
 class TestValidateXeval:
     def test_valid_config(self) -> None:
         schema: dict[str, object] = {
-            "x-eval-required": False,
             "x-eval-compare": "exact",
             "x-eval-transform": ["lowercase", "strip"],
         }
         _validate_xeval(schema, "test")  # should not raise
-
-    def test_required_not_bool(self) -> None:
-        with pytest.raises(SchemaError, match="x-eval-required must be a boolean"):
-            _validate_xeval({"x-eval-required": "yes"}, "test")
 
     def test_unknown_comparator(self) -> None:
         with pytest.raises(SchemaError, match="Unknown comparator"):
@@ -176,7 +170,6 @@ class TestParseSchema:
         assert child.path == "name"
         assert child.json_type == "string"
         assert child.comparator.name == "exact"
-        assert child.required is True
         assert child.transforms == []
 
     def test_comparator_string_form(self) -> None:
@@ -188,20 +181,6 @@ class TestParseSchema:
             },
         }
         assert _root_child(schema, "desc").comparator.name == "exact"
-
-    def test_xeval_required_false(self) -> None:
-        schema: dict[str, object] = {
-            "type": "object",
-            "x-eval-compare": "exact",
-            "properties": {
-                "optional": {
-                    "type": "string",
-                    "x-eval-compare": "exact",
-                    "x-eval-required": False,
-                },
-            },
-        }
-        assert _root_child(schema, "optional").required is False
 
     def test_xeval_transform(self) -> None:
         schema: dict[str, object] = {

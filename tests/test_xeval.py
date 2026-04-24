@@ -102,7 +102,8 @@ class TestAddDefaultXeval:
         add_default_xeval(schema)
         assert schema["properties"]["name"]["x-eval-compare"] == "semantic"  # type: ignore[index]
 
-    def test_required_from_parent_array(self) -> None:
+    def test_required_array_removed(self) -> None:
+        """The JSON Schema 'required' array is removed by add_default_xeval."""
         schema: dict[str, object] = {
             "type": "object",
             "required": ["name"],
@@ -112,39 +113,7 @@ class TestAddDefaultXeval:
             },
         }
         add_default_xeval(schema)
-        # Required fields don't get annotated (default is true)
-        assert "x-eval-required" not in schema["properties"]["name"]  # type: ignore[index]
-        # Non-required fields get x-eval-required: false
-        assert schema["properties"]["optional_field"]["x-eval-required"] is False  # type: ignore[index]
-        # required array is removed from eval schema
         assert "required" not in schema
-
-    def test_explicit_required_not_overridden(self) -> None:
-        schema: dict[str, object] = {
-            "type": "object",
-            "required": ["name"],
-            "properties": {
-                "name": {"type": "string", "x-eval-required": False},
-            },
-        }
-        add_default_xeval(schema)
-        # Explicit x-eval-required takes precedence over parent required array
-        assert schema["properties"]["name"]["x-eval-required"] is False  # type: ignore[index]
-        # required array is removed from eval schema
-        assert "required" not in schema
-
-    def test_no_required_array_defaults_all_true(self) -> None:
-        """When parent has no 'required' array, no x-eval-required is set (default true)."""
-        schema: dict[str, object] = {
-            "type": "object",
-            "properties": {
-                "a": {"type": "string"},
-                "b": {"type": "number"},
-            },
-        }
-        add_default_xeval(schema)
-        assert "x-eval-required" not in schema["properties"]["a"]  # type: ignore[index]
-        assert "x-eval-required" not in schema["properties"]["b"]  # type: ignore[index]
 
     def test_nested_object(self) -> None:
         schema: dict[str, object] = {
@@ -163,8 +132,6 @@ class TestAddDefaultXeval:
         add_default_xeval(schema)
         sample = schema["properties"]["sample"]  # type: ignore[index]
         assert sample["properties"]["name"]["x-eval-compare"] == "exact"
-        assert "x-eval-required" not in sample["properties"]["name"]
-        assert sample["properties"]["label"]["x-eval-required"] is False
         # required array is removed at all levels
         assert "required" not in sample
 
@@ -204,10 +171,7 @@ class TestAddDefaultXeval:
         items = schema["properties"]["steps"]["items"]  # type: ignore[index]
         item_props = items["properties"]
         assert item_props["name"]["x-eval-compare"] == "exact"
-        assert "x-eval-required" not in item_props["name"]
         assert item_props["duration"]["x-eval-compare"] == "numeric"
-        assert item_props["duration"]["x-eval-required"] is False
-        assert item_props["comment"]["x-eval-required"] is False
         # required array is removed from items schema
         assert "required" not in items
 

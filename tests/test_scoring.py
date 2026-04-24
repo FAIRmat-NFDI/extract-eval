@@ -78,7 +78,7 @@ class TestMissingFields:
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
-                "email": {"type": "string", "x-eval-required": False},
+                "email": {"type": "string"},
             },
         })
         results = score_record(schema, {"name": "Alice", "email": "a@b.com"}, {"name": "Alice"})
@@ -94,7 +94,7 @@ class TestMissingFields:
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
-                "email": {"type": "string", "x-eval-required": False},
+                "email": {"type": "string"},
             },
         })
         results = score_record(schema, {"name": "Alice"}, {"name": "Alice"})
@@ -107,7 +107,7 @@ class TestMissingFields:
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
-                "email": {"type": "string", "x-eval-required": False},
+                "email": {"type": "string"},
             },
         })
         results = score_record(schema, {"name": "Alice"}, {"name": "Alice", "email": "a@b.com"})
@@ -606,7 +606,7 @@ class TestSkipFields:
         assert by_path["description"].status == "skipped"
 
     def test_skip_excluded_from_metrics(self) -> None:
-        # x-eval-required: true (default) + x-eval-skip: true
+        # x-eval-skip: true
         # skip fields appear in results but don't affect precision/recall/F1
         schema = _make_schema({
             "type": "object",
