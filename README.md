@@ -53,7 +53,7 @@ human** before running. There is no "do everything automatically" mode.
 
 ```python
 import json
-from struct_extract_eval import evaluate, generate_eval_schema
+from struct_extract_eval import evaluate, infer_schema, add_default_xeval
 
 gold = [
     {"method": "sputtering", "temperature": 300, "lab_id": "A1"},
@@ -64,8 +64,9 @@ extracted = [
     {"method": "evaporation", "temperature": 460, "lab_id": "B3"},
 ]
 
-# 1. Generate an eval schema from gold (or provide your own resolved schema)
-eval_schema = generate_eval_schema(gold=gold)
+# 1. Infer a resolved schema from gold, then add eval defaults
+eval_schema = infer_schema(gold)
+add_default_xeval(eval_schema)
 with open("eval_schema.json", "w") as f:
     json.dump(eval_schema, f, indent=2)
 
@@ -150,9 +151,11 @@ Add `x-eval-*` extension keys that tell the evaluator how to compare each field:
 
 ```python
 import json
-from struct_extract_eval import generate_eval_schema
+from copy import deepcopy
+from struct_extract_eval import add_default_xeval
 
-eval_schema = generate_eval_schema(schema=resolved_schema)
+eval_schema = deepcopy(resolved_schema)
+add_default_xeval(eval_schema)  # mutates in-place
 with open("eval_schema.json", "w") as f:
     json.dump(eval_schema, f, indent=2)
 ```
@@ -533,7 +536,6 @@ with.
 |------------------------------------------------|------------------------------------------------------------------|
 | `infer_schema(instances)`                      | Infer resolved schema from gold instances                        |
 | `add_default_xeval(schema)`                    | Annotate a resolved schema with `x-eval-*` defaults (in-place)   |
-| `generate_eval_schema(gold?, schema?)`          | Generate eval schema (resolved + `x-eval-*` defaults) for review |
 | `evaluate(gold, extracted, schema, id_field?)` | Evaluate gold vs extracted using a reviewed eval schema          |
 | `parse_schema(schema)`                         | Parse an eval schema into the internal tree representation       |
 
