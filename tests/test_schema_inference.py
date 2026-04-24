@@ -31,9 +31,8 @@ class TestInferSchema:
         # name is in both -> required, email is not -> absent from required
         assert "name" in schema["required"]
         assert "email" not in schema["required"]
-        # no x-eval-required on individual fields
-        assert "x-eval-required" not in schema["properties"]["name"]
-        assert "x-eval-required" not in schema["properties"]["email"]
+        # infer_schema does not add x-eval-* keys
+        assert "x-eval-compare" not in schema["properties"]["name"]
 
     def test_all_null_field(self) -> None:
         schema = infer_schema([{"x": None}, {"x": None}])

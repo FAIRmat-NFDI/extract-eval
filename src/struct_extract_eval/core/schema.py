@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 
 _KNOWN_XEVAL_KEYS = frozenset(
     {
-        "x-eval-required",
         "x-eval-compare",
         "x-eval-transform",
         "x-eval-skip",
@@ -55,7 +54,6 @@ class SchemaNode:
     json_type: str
     comparator: ComparatorSpec = field(default_factory=ComparatorSpec)
     children: list["SchemaNode"] = field(default_factory=list)
-    required: bool = True
     skip: bool = False
     transforms: list[TransformSpec] = field(default_factory=list)
     # Array-only. None for leaf and object nodes.
@@ -72,9 +70,6 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
             )
         if key.startswith("x-eval-") and key not in _KNOWN_XEVAL_KEYS:
             logger.warning("Unknown x-eval key '%s' at path '%s'", key, path)
-
-    if "x-eval-required" in schema and not isinstance(schema["x-eval-required"], bool):
-        raise SchemaError("x-eval-required must be a boolean", path)
 
     if "x-eval-skip" in schema and not isinstance(schema["x-eval-skip"], bool):
         raise SchemaError("x-eval-skip must be a boolean", path)
@@ -246,8 +241,6 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
         children=children,
         transforms=transforms,
     )
-    if "x-eval-required" in schema:
-        node.required = schema["x-eval-required"]
     if schema.get("x-eval-skip"):
         node.skip = True
     if "x-eval-align" in schema:

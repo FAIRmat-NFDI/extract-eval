@@ -3,7 +3,6 @@
 ``add_default_xeval`` annotates a resolved schema in-place with sensible
 ``x-eval-*`` defaults. Leaf fields without an existing ``x-eval-compare``
 or ``x-eval-skip`` get an explicit ``x-eval-compare`` inferred from type.
-``x-eval-required`` is only annotated when ``false``; the default is ``true``.
 
 ``parse_xeval_entry`` is the shared parser for the two-shape rule used
 by both ``x-eval-transform`` and ``x-eval-compare``.
@@ -57,11 +56,10 @@ def add_default_xeval(schema: dict[str, object]) -> dict[str, object]:
     Walks the schema tree. For each leaf node without an explicit
     ``x-eval-compare`` or ``x-eval-skip``, infers the comparator from
     the node's type.
-    For each property of an object, infers ``x-eval-required`` from
-    the parent's ``required`` array (explicit ``x-eval-required`` is
-    never overridden). The ``required`` array is then removed -- the
-    eval schema uses only ``x-eval-required`` (annotated only when
-    ``false``; ``true`` is the default).
+
+    The JSON Schema ``required`` array is removed since the eval schema
+    does not use it -- scoring depends on what gold contains, not on
+    which fields are declared required.
 
     Returns the schema for convenience (same object, mutated in-place).
     """
@@ -76,28 +74,9 @@ def _annotate_node(schema: dict[str, object]) -> None:
             schema["x-eval-compare"] = _default_comparator(schema)
         return
 
-    # Container node (object or array): set x-eval-required on children,
-    # then recurse.
-    required_raw = schema.get("required")
-    required_keys: set[str] | None = None
-    if isinstance(required_raw, list):
-        required_keys = set()
-        for idx, value in enumerate(required_raw):
-            if not isinstance(value, str):
-                raise TypeError(
-                    f"Schema 'required' entries must be strings, got "
-                    f"{type(value).__name__} at index {idx}: {value!r}"
-                )
-            required_keys.add(value)
-
-    for field_name, child_schema, _child_path in get_children(schema):
-        # Only mark x-eval-required: false for fields not in the required array.
-        # Default is true, so no annotation needed for required fields.
-        if field_name != "[]" and "x-eval-required" not in child_schema:
-            if required_keys is not None and field_name not in required_keys:
-                child_schema["x-eval-required"] = False
-
+    # Container node (object or array): recurse into children.
+    for _field_name, child_schema, _child_path in get_children(schema):
         _annotate_node(child_schema)
 
-    # Remove the JSON Schema required array -- eval schema uses only x-eval-required.
+    # Remove the JSON Schema required array -- eval schema doesn't use it.
     schema.pop("required", None)
