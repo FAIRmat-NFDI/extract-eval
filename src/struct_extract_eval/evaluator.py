@@ -4,8 +4,8 @@ Usage is intentionally step-by-step. The evaluator does not silently infer or
 annotate schemas -- the user must review the eval schema (x-eval-* config)
 before running. Typical flow:
 
-    1. resolved = infer_schema(gold)
-    2. add_default_xeval(resolved)          # adds x-eval-* defaults in-place
+    1. eval_schema = infer_schema(gold)
+    2. add_default_xeval(eval_schema)       # adds x-eval-* defaults in-place
     3. # save to file, review / edit
     4. result = evaluate(gold, extracted, schema=eval_schema)
 

@@ -268,7 +268,7 @@ class TestKeyFieldAlignment:
         assert len(matches) == 2  # anneal.name + anneal.temp
         assert len(hallucinations) == 1  # only temp (name not produced)
 
-    # todo test this case later with hangarian match
+    # TODO: test this case later with Hungarian match
     def test_duplicate_keys_in_extracted(self) -> None:
         # Two extracted elements share the same key. First wins the match;
         # the duplicate is treated as an unmatched hallucination.

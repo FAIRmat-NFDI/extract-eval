@@ -80,6 +80,12 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
         raise SchemaError("x-eval-skip must be a boolean", path)
 
     if "x-eval-align" in schema:
+        if resolve_type(schema) != "array":
+            raise SchemaError(
+                "x-eval-align is only valid on array nodes, "
+                f"but this node has type '{resolve_type(schema)}'",
+                path,
+            )
         raw_align = schema["x-eval-align"]
         if not isinstance(raw_align, dict):
             raise SchemaError("x-eval-align must be a dict", path)
@@ -90,6 +96,11 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
         if "ordered" in raw_align and not isinstance(raw_align["ordered"], bool):
             raise SchemaError(
                 "x-eval-align 'ordered' must be a boolean", path
+            )
+        if raw_align.get("ordered") is False and "match_by" not in raw_align:
+            raise SchemaError(
+                "x-eval-align with ordered=false must specify 'match_by'",
+                path,
             )
         match_by = raw_align.get("match_by")
         if match_by is not None:

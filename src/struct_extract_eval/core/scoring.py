@@ -301,19 +301,21 @@ def _score_array_matched_by_key_field(
     # Build lookup: key_value -> first element for extracted.
     # Duplicate keys in extracted: first occurrence wins the match,
     # subsequent duplicates are treated as unmatched (hallucinations).
-    extracted_by_key: dict[str | int | float | bool, object] = {}
+    extracted_by_key: dict[str | int | float, object] = {}
     extracted_unmatched: list[object] = []
     for elem in extracted_list:
         if not isinstance(elem, dict) or key not in elem:
             extracted_unmatched.append(elem)
             continue
         k = elem[key]
-        if not isinstance(k, (str, int, float, bool)):
-            # Unhashable or non-primitive key value — can't match
+        if not isinstance(k, (str, int, float)):
+            # Unhashable, non-primitive, or bool key value — can't match.
+            # bool is excluded because True == 1 and False == 0 in Python,
+            # which causes silent key collisions in the lookup dict.
             logger.warning(
-                "Key field '%s' at '%s' has unhashable value %s. "
+                "Key field '%s' at '%s' has non-matchable value %r (%s). "
                 "Element treated as unmatched.",
-                key, node.path, type(k).__name__,
+                key, node.path, k, type(k).__name__,
             )
             extracted_unmatched.append(elem)
             continue
@@ -328,7 +330,7 @@ def _score_array_matched_by_key_field(
             continue
         extracted_by_key[k] = elem
 
-    matched_keys: set[str | int | float | bool] = set()
+    matched_keys: set[str | int | float] = set()
 
     # Match gold elements against extracted by key
     for gold_elem in gold_list:
@@ -337,11 +339,11 @@ def _score_array_matched_by_key_field(
             results.extend(_omission_results(items_node, gold_elem))
             continue
         k = gold_elem[key]
-        if not isinstance(k, (str, int, float, bool)):
+        if not isinstance(k, (str, int, float)):
             logger.warning(
-                "Key field '%s' at '%s' has unhashable value %s in gold. "
-                "Element treated as unmatched.",
-                key, node.path, type(k).__name__,
+                "Key field '%s' at '%s' has non-matchable value %r (%s) "
+                "in gold. Element treated as unmatched.",
+                key, node.path, k, type(k).__name__,
             )
             results.extend(_omission_results(items_node, gold_elem))
             continue
@@ -529,7 +531,8 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
         for child in node.children:
             field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
             if field_name not in extracted_dict:
-                continue  # can't hallucinate what wasn't produced, for example, extracted[{"a":1, "b":2}, {"a":3, "b":4}], gold[{"b":2}], there are 3 hallucination
+                # Can't hallucinate what wasn't produced.
+                continue
             results.extend(_hallucination_results(child, extracted_dict[field_name]))
         return results
     if node.json_type == "array" and node.children:
