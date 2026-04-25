@@ -1,14 +1,14 @@
 from copy import deepcopy
 
 from struct_extract_eval.core.schema_inference import infer_schema
-from struct_extract_eval.core.xeval import add_default_xeval
+from struct_extract_eval.core.xeval import annotate_xeval
 from struct_extract_eval.evaluator import evaluate
 
 
 def _eval_schema(resolved: dict[str, object]) -> dict[str, object]:
     """Helper: annotate a resolved schema with x-eval-* defaults for tests."""
     schema = deepcopy(resolved)
-    add_default_xeval(schema)
+    annotate_xeval(schema)
     return schema
 
 
@@ -56,7 +56,7 @@ class TestEvaluate:
         gold = [{"name": "Alice", "age": 30}]
         extracted = [{"name": "Alice", "age": 30}]
         resolved = infer_schema(gold)
-        add_default_xeval(resolved)
+        annotate_xeval(resolved)
         run = evaluate(gold, extracted, schema=resolved)
         assert run.mean_f1 == 1.0
         assert run.total_records == 1

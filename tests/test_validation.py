@@ -1,12 +1,12 @@
 import pytest
 
 from struct_extract_eval.core.validation import GoldValidationError, validate_gold
-from struct_extract_eval.core.xeval import add_default_xeval
+from struct_extract_eval.core.xeval import annotate_xeval
 
 
 def _eval_schema(raw: dict[str, object]) -> dict[str, object]:
     """Helper: add x-eval-* defaults for tests."""
-    add_default_xeval(raw)
+    annotate_xeval(raw)
     return raw
 
 

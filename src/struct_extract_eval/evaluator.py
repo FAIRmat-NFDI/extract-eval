@@ -5,7 +5,7 @@ annotate schemas -- the user must review the eval schema (x-eval-* config)
 before running. Typical flow:
 
     1. eval_schema = infer_schema(gold)
-    2. add_default_xeval(eval_schema)       # adds x-eval-* defaults in-place
+    2. annotate_xeval(eval_schema)       # adds x-eval-* defaults in-place
     3. # save to file, review / edit
     4. result = evaluate(gold, extracted, schema=eval_schema)
 
@@ -61,7 +61,7 @@ def evaluate(
     """Evaluate extracted records against gold using field-level comparison.
 
     Requires an eval schema -- a resolved schema with x-eval-* annotations.
-    Use ``infer_schema()`` + ``add_default_xeval()`` to produce one, review
+    Use ``infer_schema()`` + ``annotate_xeval()`` to produce one, review
     and edit it, then pass it here.
 
     If your schema references a batch comparator (e.g. ``"semantic"`` or any
@@ -73,7 +73,7 @@ def evaluate(
         gold: Gold (ground truth) instances.
         extracted: Extracted (LLM output) instances. Must be same length as gold.
         schema: Eval schema (resolved schema with x-eval-* annotations).
-            Use ``infer_schema()`` + ``add_default_xeval()`` and review
+            Use ``infer_schema()`` + ``annotate_xeval()`` and review
             before passing.
         id_field: Field name to use as record ID (read from gold).
             Defaults to integer index.

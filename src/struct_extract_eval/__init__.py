@@ -11,7 +11,7 @@ from struct_extract_eval.core.schema_inference import infer_schema
 from struct_extract_eval.core.scoring import FieldResult, score_record
 from struct_extract_eval.core.transforms.transform import TransformSpec
 from struct_extract_eval.core.validation import GoldValidationError, validate_gold
-from struct_extract_eval.core.xeval import add_default_xeval, parse_xeval_entry
+from struct_extract_eval.core.xeval import annotate_xeval, parse_xeval_entry, set_type_default
 from struct_extract_eval.evaluator import evaluate
 
 __all__ = [
@@ -23,8 +23,9 @@ __all__ = [
     "RunResult",
     "SchemaNode",
     "TransformSpec",
-    "add_default_xeval",
+    "annotate_xeval",
     "evaluate",
+    "set_type_default",
     "infer_schema",
     "parse_schema",
     "parse_xeval_entry",
