@@ -34,7 +34,7 @@ class TestParseXevalEntry:
             parse_xeval_entry(123)  # type: ignore[arg-type]
 
 
-class TestAddDefaultXeval:
+class TestAnnotateXeval:
     def test_string_field_gets_exact(self) -> None:
         schema: dict[str, object] = {
             "type": "object",
