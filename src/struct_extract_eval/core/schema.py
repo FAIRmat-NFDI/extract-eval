@@ -3,7 +3,7 @@
 Parses an eval schema (resolved schema + x-eval-* extensions) into a
 SchemaNode tree. All downstream scoring code works with SchemaNode.
 
-Call add_default_xeval() to get eval schema -- parse_schema
+Call annotate_xeval() to get eval schema -- parse_schema
 does not assign comparator defaults for leaf nodes, it validates
 and parses. Container nodes (objects/arrays) get a placeholder
 comparator since they are scored via their children, not directly.
@@ -185,7 +185,7 @@ def _resolve_comparator_spec(
     if "x-eval-compare" not in schema:
         if is_leaf(schema) and not schema.get("x-eval-skip"):
             raise SchemaError(
-                "missing x-eval-compare -- run add_default_xeval first", path
+                "missing x-eval-compare -- run annotate_xeval first", path
             )
         return ComparatorSpec()
 
@@ -256,7 +256,7 @@ def parse_schema(raw_schema: dict[str, object]) -> SchemaNode:
 
     Expects:
     - $ref and allOf resolved by the caller
-    - x-eval-* defaults filled in by add_default_xeval
+    - x-eval-* defaults filled in by annotate_xeval
 
     Validates all x-eval-* keys at parse time. Does not assign defaults.
     """

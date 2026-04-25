@@ -11,12 +11,12 @@ import pytest
 
 from struct_extract_eval.core.schema import SchemaError, parse_schema
 from struct_extract_eval.core.scoring import score_record
-from struct_extract_eval.core.xeval import add_default_xeval
+from struct_extract_eval.core.xeval import annotate_xeval
 from struct_extract_eval.evaluator import evaluate
 
 
 def _make_schema(raw: dict[str, object]) -> "SchemaNode":
-    add_default_xeval(raw)
+    annotate_xeval(raw)
     return parse_schema(raw)
 
 
@@ -368,7 +368,7 @@ class TestKeyFieldAlignment:
         raw_schema = _steps_schema(
             {"match_by": "key_field", "key": "name"}
         )
-        add_default_xeval(raw_schema)
+        annotate_xeval(raw_schema)
         gold = [
             {
                 "steps": [
