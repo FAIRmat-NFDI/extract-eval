@@ -1,6 +1,9 @@
 """Domain-agnostic benchmark for evaluating LLM JSON extraction."""
 
-from struct_extract_eval.core.comparators.comparator import ComparatorSpec
+from struct_extract_eval.core.comparators.comparator import (
+    ComparatorSpec,
+    CompoundComparator,
+)
 from struct_extract_eval.core.record import (
     FieldAggregation,
     RecordResult,
@@ -16,6 +19,7 @@ from struct_extract_eval.evaluator import evaluate
 
 __all__ = [
     "ComparatorSpec",
+    "CompoundComparator",
     "FieldAggregation",
     "FieldResult",
     "GoldValidationError",

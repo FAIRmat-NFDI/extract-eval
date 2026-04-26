@@ -499,84 +499,38 @@ class TestQuantityBatchComparatorExample:
         assert record.f1 == 0.0
 
 
-# --- compound comparator example: name (family_name + given_name) ---
+# --- compound comparator using CompoundComparator base class ---
+
+from struct_extract_eval.core.comparators.comparator import CompoundComparator
 
 
-class NameCompoundComparator:
-    """Example compound BatchComparator: scores family_name + given_name as one name.
+class NameCompoundComparator(CompoundComparator):
+    """Example: scores family_name + given_name as one full name.
 
-    The primary field (default: family_name) gets the compound score.
-    The supporting field gets status="skipped" via ComparatorResult(skip=True).
-    This way the compound group counts as 1 field in the metrics, not 2.
+    Uses the CompoundComparator base class -- only the compare() method
+    needs to be written. Grouping, primary/skip, incomplete handling are
+    all handled by the base class.
     """
 
-    is_batch = True
+    def __init__(self) -> None:
+        super().__init__(
+            fields=["family_name", "given_name"],
+            primary="family_name",
+            name="name_compound",
+        )
 
-    def __init__(self, primary_field: str = "family_name") -> None:
-        self.primary_field = primary_field
-
-    def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
-        # Group by parent path: "student.family_name" + "student.given_name" -> "student"
-        by_parent: dict[str, list[tuple[int, BatchItem]]] = {}
-        for i, item in enumerate(items):
-            parent = item.path.rsplit(".", 1)[0] if "." in item.path else ""
-            by_parent.setdefault(parent, []).append((i, item))
-
-        result_by_index: dict[int, ComparatorResult] = {}
-        for parent, group in by_parent.items():
-            # Extract the field values from the group
-            fields: dict[str, tuple[int, BatchItem]] = {}
-            for idx, item in group:
-                field_name = item.path.rsplit(".", 1)[-1] if "." in item.path else item.path
-                fields[field_name] = (idx, item)
-
-            family = fields.get("family_name")
-            given = fields.get("given_name")
-
-            if family is None or given is None:
-                # Incomplete group — score 0
-                for idx, _item in group:
-                    result_by_index[idx] = ComparatorResult(
-                        score=0.0, comparator="name_compound",
-                        reason="incomplete compound (missing sibling field)",
-                    )
-                continue
-
-            score = self._compare_names(
-                gold_family=str(family[1].gold_compared or ""),
-                gold_given=str(given[1].gold_compared or ""),
-                ext_family=str(family[1].extracted_compared or ""),
-                ext_given=str(given[1].extracted_compared or ""),
-            )
-
-            for field_name, (idx, _item) in fields.items():
-                if field_name == self.primary_field:
-                    result_by_index[idx] = ComparatorResult(
-                        score=score, comparator="name_compound",
-                        reason="compound: name matches" if score == 1.0 else "compound: name differs",
-                    )
-                else:
-                    result_by_index[idx] = ComparatorResult(
-                        score=0.0, comparator="name_compound",
-                        reason=f"compound with {parent}.{self.primary_field}",
-                        skip=True,
-                    )
-
-        return [result_by_index.get(i) for i in range(len(items))]
-
-    @staticmethod
-    def _compare_names(
-        gold_family: str, gold_given: str,
-        ext_family: str, ext_given: str,
+    def compare(
+        self, gold: dict[str, object], extracted: dict[str, object]
     ) -> float:
-        """Compare two full names regardless of how they're split across fields."""
+        def normalize(name: str) -> str:
+            return " ".join(str(name).lower().split())
 
-        gold_full = f"{gold_given} {gold_family}"
-        ext_full = f"{ext_given} {ext_family}"
+        gold_full = normalize(f"{gold['given_name']} {gold['family_name']}")
+        ext_full = normalize(f"{extracted['given_name']} {extracted['family_name']}")
         if gold_full == ext_full:
             return 1.0
-        # Try swapped order (handles family/given swap)
-        ext_swapped = f"{ext_family} {ext_given}"
+        # Try swapped order
+        ext_swapped = normalize(f"{extracted['family_name']} {extracted['given_name']}")
         if gold_full == ext_swapped:
             return 1.0
         return 0.0
@@ -672,6 +626,100 @@ class TestNameCompoundComparator:
         assert len(scored) == 1
         assert scored[0].path == "family_name"
         assert record.f1 == 1.0
+
+
+# --- CompoundComparator base class ---
+
+
+class TestCompoundComparatorBaseClass:
+    """Tests for the CompoundComparator base class itself."""
+
+    def test_primary_must_be_in_fields(self) -> None:
+        with pytest.raises(ValueError, match="primary field"):
+            CompoundComparator(fields=["a", "b"], primary="c")
+
+    def test_minimal_subclass(self) -> None:
+        """A simple quantity comparator using the base class."""
+
+        class QuantityCC(CompoundComparator):
+            def __init__(self) -> None:
+                super().__init__(fields=["value", "unit"], primary="value", name="qty")
+
+            def compare(self, gold: dict[str, object], extracted: dict[str, object]) -> float:
+                # Trivial: just check both fields match exactly
+                return 1.0 if gold == extracted else 0.0
+
+        register("qty", QuantityCC())
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "measurement": {"type": "object", "properties": {
+                    "value": {"type": "number", "x-eval-compare": "qty"},
+                    "unit": {"type": "string", "x-eval-compare": "qty"},
+                }},
+            },
+        }
+        gold = [{"measurement": {"value": 10, "unit": "m"}}]
+        ext = [{"measurement": {"value": 10, "unit": "m"}}]
+        result = evaluate(gold, ext, schema=schema)
+        record = result.records[0]
+
+        by_path = {r.path: r for r in record.field_results}
+        assert by_path["measurement.value"].status == "match"
+        assert by_path["measurement.value"].score == 1.0
+        assert by_path["measurement.unit"].status == "skipped"
+        assert record.f1 == 1.0
+
+    def test_mismatch_scores_zero(self) -> None:
+        class AlwaysMismatch(CompoundComparator):
+            def __init__(self) -> None:
+                super().__init__(fields=["a", "b"], primary="a", name="test")
+
+            def compare(self, gold: dict[str, object], extracted: dict[str, object]) -> float:
+                return 0.0
+
+        register("test", AlwaysMismatch())
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "string", "x-eval-compare": "test"},
+                "b": {"type": "string", "x-eval-compare": "test"},
+            },
+        }
+        result = evaluate([{"a": "x", "b": "y"}], [{"a": "x", "b": "y"}], schema=schema)
+        record = result.records[0]
+        by_path = {r.path: r for r in record.field_results}
+        assert by_path["a"].status == "mismatch"
+        assert by_path["a"].score == 0.0
+        assert by_path["b"].status == "skipped"
+
+    def test_incomplete_group_scores_zero(self) -> None:
+        """If one sibling field is omitted, the remaining field scores 0."""
+
+        class SimpleCC(CompoundComparator):
+            def __init__(self) -> None:
+                super().__init__(fields=["a", "b"], primary="a", name="simple")
+
+            def compare(self, gold: dict[str, object], extracted: dict[str, object]) -> float:
+                return 1.0
+
+        register("simple", SimpleCC())
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "string", "x-eval-compare": "simple"},
+                "b": {"type": "string", "x-eval-compare": "simple"},
+            },
+        }
+        # "b" missing from extracted -> omission for "b", incomplete compound for "a"
+        result = evaluate([{"a": "x", "b": "y"}], [{"a": "x"}], schema=schema)
+        record = result.records[0]
+        by_path = {r.path: r for r in record.field_results}
+        # "b" is an omission (handled by _score_object, never reaches batch)
+        assert by_path["b"].status == "omission"
+        # "a" arrives alone in the batch -> incomplete compound
+        assert by_path["a"].score == 0.0
+        assert "incomplete" in (by_path["a"].reason or "")
 
 
 # --- Value validation in the LLM judge response parser ---

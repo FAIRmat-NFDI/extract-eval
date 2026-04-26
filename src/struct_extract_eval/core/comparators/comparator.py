@@ -107,3 +107,124 @@ class BatchComparator(Protocol):
     def __call__(
         self, items: list[BatchItem]
     ) -> list[ComparatorResult | None]: ...
+
+
+class CompoundComparator:
+    """Base class for compound comparators that score sibling fields as one unit.
+
+    Handles all the boilerplate: group-by-parent, field extraction, incomplete
+    group handling, primary/skip result construction. Subclasses only override
+    ``compare()`` with the actual comparison logic.
+
+    Usage::
+
+        class NameComparator(CompoundComparator):
+            def __init__(self):
+                super().__init__(
+                    fields=["surname", "name"],
+                    primary="surname",
+                    name="name_compound",
+                )
+
+            def compare(self, gold: dict[str, object], extracted: dict[str, object]) -> float:
+                g = f"{gold['name']} {gold['surname']}".lower()
+                e = f"{extracted['name']} {extracted['surname']}".lower()
+                return 1.0 if g == e else 0.0
+
+        register("name_compound", NameComparator())
+
+    Schema::
+
+        {"surname": {"x-eval-compare": "name_compound"},
+         "name":    {"x-eval-compare": "name_compound"}}
+
+    Args:
+        fields: list of sibling field names that form the compound
+            (e.g. ``["surname", "name"]``).
+        primary: which field gets the compound score. Must be in ``fields``.
+            All other fields get ``status="skipped"`` (excluded from metrics).
+        name: comparator name used in ``ComparatorResult.comparator``.
+    """
+
+    is_batch = True
+
+    def __init__(self, fields: list[str], primary: str, name: str = "compound") -> None:
+        if primary not in fields:
+            raise ValueError(
+                f"primary field {primary!r} must be in fields {fields}"
+            )
+        self.fields = fields
+        self.primary = primary
+        self.name = name
+
+    def compare(
+        self, gold: dict[str, object], extracted: dict[str, object]
+    ) -> float:
+        """Override this. Return a score in [0.0, 1.0].
+
+        ``gold`` and ``extracted`` are dicts mapping field name to the
+        post-transform value for each sibling field in the compound group.
+
+        Example for fields=["surname", "name"]::
+
+            gold      = {"surname": "Smith", "name": "John"}
+            extracted = {"surname": "Smith", "name": "Jane"}
+        """
+        raise NotImplementedError
+
+    def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
+        # Group items by parent path
+        by_parent: dict[str, list[tuple[int, BatchItem]]] = {}
+        for i, item in enumerate(items):
+            parent = item.path.rsplit(".", 1)[0] if "." in item.path else ""
+            by_parent.setdefault(parent, []).append((i, item))
+
+        result_by_index: dict[int, ComparatorResult] = {}
+
+        for parent, group in by_parent.items():
+            # Extract field name -> (index, item) for this group
+            fields: dict[str, tuple[int, BatchItem]] = {}
+            for idx, item in group:
+                field_name = (
+                    item.path.rsplit(".", 1)[-1] if "." in item.path else item.path
+                )
+                fields[field_name] = (idx, item)
+
+            # Check all expected fields are present
+            missing = [f for f in self.fields if f not in fields]
+            if missing:
+                for idx, _ in group:
+                    result_by_index[idx] = ComparatorResult(
+                        score=0.0,
+                        comparator=self.name,
+                        reason=f"incomplete compound (missing {missing})",
+                    )
+                continue
+
+            # Build gold/extracted dicts from post-transform values
+            gold_dict = {
+                f: fields[f][1].gold_compared for f in self.fields
+            }
+            extracted_dict = {
+                f: fields[f][1].extracted_compared for f in self.fields
+            }
+
+            score = self.compare(gold_dict, extracted_dict)
+
+            # Primary field gets the score, others get skipped
+            for field_name, (idx, _) in fields.items():
+                if field_name == self.primary:
+                    result_by_index[idx] = ComparatorResult(
+                        score=score,
+                        comparator=self.name,
+                        reason="compound: match" if score >= 1.0 else "compound: mismatch",
+                    )
+                else:
+                    result_by_index[idx] = ComparatorResult(
+                        score=0.0,
+                        comparator=self.name,
+                        reason=f"compound with {parent}.{self.primary}",
+                        skip=True,
+                    )
+
+        return [result_by_index.get(i) for i in range(len(items))]
