@@ -175,10 +175,14 @@ def process_batches(
                 r.status = "batch_error"
                 r.pending_batch = None
                 continue
-            r.score = out.score
             r.reason = out.reason
-            r.status = "match" if out.score >= 1.0 else "mismatch"
             r.pending_batch = None
+            if out.skip:
+                r.score = 0.0
+                r.status = "skipped"
+            else:
+                r.score = out.score
+                r.status = "match" if out.score >= 1.0 else "mismatch"
 
     return field_results
 

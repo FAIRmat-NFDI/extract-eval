@@ -28,11 +28,15 @@ class ComparatorResult:
     score: float in [0.0, 1.0]
     comparator: name of the comparator that produced this result
     reason: human-readable explanation, propagated to FieldResult.reason
+    skip: if True, process_batches sets status="skipped" instead of match/mismatch.
+        Used by compound comparators to mark supporting fields that contributed
+        to a primary field's score but should not be counted in metrics themselves.
     """
 
     score: float
     comparator: str
     reason: str | None = field(default=None)
+    skip: bool = field(default=False)
 
 
 @dataclass(frozen=True)

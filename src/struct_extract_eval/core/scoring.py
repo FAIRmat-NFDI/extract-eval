@@ -17,6 +17,31 @@ from struct_extract_eval.core.transforms.transform import TransformSpec
 
 logger = logging.getLogger(__name__)
 
+
+def _rewrite_element_paths(
+    results: list["FieldResult"],
+    items_path: str,
+    element_index: int,
+) -> None:
+    """Rewrite schema paths to instance paths for array element results.
+
+    Replaces the LAST ``[]`` in items_path with the element index:
+    ``"steps[].name"`` -> ``"steps[0].name"``
+    ``"layers[].steps[].name"`` -> ``"layers[].steps[0].name"``
+
+    ``items_path`` is needed to know WHICH ``[]`` to replace -- in nested
+    arrays a path has multiple ``[]`` and only the current level should
+    be rewritten. The parent's ``[]`` is resolved by the parent's array scorer.
+    """
+    last_bracket = items_path.rfind("[]")
+    instance_path = (
+        items_path[:last_bracket] + f"[{element_index}]" + items_path[last_bracket + 2:]
+    )
+    prefix_len = len(items_path)
+    for r in results:
+        r.path = instance_path + r.path[prefix_len:]
+
+
 FieldStatus = Literal[
     "match", "mismatch", "omission", "hallucination", "skipped",
     "pending", "batch_error",
@@ -221,15 +246,22 @@ def _score_array_ordered(
     # Matched pairs: compare element by element
     matched_count = min(len(gold_list), len(extracted_list))
     for i in range(matched_count):
-        results.extend(_score_node(items_node, gold_list[i], extracted_list[i]))
+        element_results = _score_node(items_node, gold_list[i], extracted_list[i])
+        _rewrite_element_paths(element_results, items_node.path, i)
+        results.extend(element_results)
 
     # Extra gold elements: omissions
     for i in range(matched_count, len(gold_list)):
-        results.extend(_omission_results(items_node, gold_list[i]))
+        element_results = _omission_results(items_node, gold_list[i])
+        _rewrite_element_paths(element_results, items_node.path, i)
+        results.extend(element_results)
 
     # Extra extracted elements: hallucinations
+    # Index -1: these elements have no gold counterpart.
     for i in range(matched_count, len(extracted_list)):
-        results.extend(_hallucination_results(items_node, extracted_list[i]))
+        element_results = _hallucination_results(items_node, extracted_list[i])
+        _rewrite_element_paths(element_results, items_node.path, -1)
+        results.extend(element_results)
 
     return results
 
@@ -330,11 +362,16 @@ def _score_array_matched_by_key_field(
     matched_keys: set[str | int | float] = set()
 
     # Match gold elements against extracted by key
-    for gold_elem in gold_list:
+    for idx, gold_elem in enumerate(gold_list):
+
+        # todo rethink if the gold missing the key, what to do ?
         if not isinstance(gold_elem, dict) or key not in gold_elem:
             # Gold element missing the key field — omission
-            results.extend(_omission_results(items_node, gold_elem))
+            element_results = _omission_results(items_node, gold_elem)
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
             continue
+
         k = gold_elem[key]
         if isinstance(k, bool) or not isinstance(k, (str, int, float)):
             logger.warning(
@@ -342,7 +379,10 @@ def _score_array_matched_by_key_field(
                 "in gold. Element treated as unmatched.",
                 key, node.path, k, type(k).__name__,
             )
-            results.extend(_omission_results(items_node, gold_elem))
+            # todo rethink when key is not hashable, what todo ?
+            element_results = _omission_results(items_node, gold_elem)
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
             continue
         if k in matched_keys:
             # Duplicate key in gold — first already consumed the match
@@ -351,26 +391,39 @@ def _score_array_matched_by_key_field(
                 "Only the first occurrence is matched.",
                 key, k, node.path,
             )
-            results.extend(_omission_results(items_node, gold_elem))
+
+            # todo rethink when key not unique, what to do ?
+            element_results = _omission_results(items_node, gold_elem)
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
         elif k in extracted_by_key:
             # Matched pair: score recursively
             matched_keys.add(k)
-            results.extend(
-                _score_node(items_node, gold_elem, extracted_by_key[k])
+            element_results = _score_node(
+                items_node, gold_elem, extracted_by_key[k]
             )
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
         else:
             # No match in extracted — omission
-            results.extend(_omission_results(items_node, gold_elem))
+            element_results = _omission_results(items_node, gold_elem)
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
 
     # Unmatched extracted elements (key not in gold) — hallucinations
+    # Index -1: these elements have no gold counterpart.
     for k, elem in extracted_by_key.items():
         if k not in matched_keys:
-            results.extend(_hallucination_results(items_node, elem))
+            element_results = _hallucination_results(items_node, elem)
+            _rewrite_element_paths(element_results, items_node.path, -1)
+            results.extend(element_results)
 
     # Extracted elements without the key field or with
     # unhashable/duplicate keys — hallucinations
     for elem in extracted_unmatched:
-        results.extend(_hallucination_results(items_node, elem))
+        element_results = _hallucination_results(items_node, elem)
+        _rewrite_element_paths(element_results, items_node.path, -1)
+        results.extend(element_results)
 
     return results
 

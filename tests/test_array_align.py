@@ -227,8 +227,9 @@ class TestKeyFieldAlignment:
         extracted = {"steps": [{"name": "anneal", "temp": 999}]}
         results = score_record(schema, gold, extracted)
         by_path = {r.path: r for r in results}
-        assert by_path["steps[].name"].status == "match"
-        assert by_path["steps[].temp"].status == "mismatch"
+        # Instance paths: steps[0].name, steps[0].temp
+        assert by_path["steps[0].name"].status == "match"
+        assert by_path["steps[0].temp"].status == "mismatch"
 
     def test_empty_arrays_match(self) -> None:
         schema = _make_schema(

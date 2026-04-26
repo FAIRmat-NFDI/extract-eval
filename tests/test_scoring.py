@@ -419,7 +419,9 @@ class TestArrayTypeErrors:
         results = score_record(schema, {"tags": ["a", "b"]}, {"tags": "bad"})
         assert len(results) == 2
         assert all(r.status == "omission" for r in results)
-        assert all(r.path == "tags[]" for r in results)
+        # Instance paths: tags[0], tags[1] instead of tags[]
+        assert results[0].path == "tags[0]"
+        assert results[1].path == "tags[1]"
 
     def test_gold_not_list_extracted_list(self) -> None:
         # gold="bad", extracted=[a,b] -> 2 hallucinations per element
@@ -427,7 +429,8 @@ class TestArrayTypeErrors:
         results = score_record(schema, {"tags": "bad"}, {"tags": ["a", "b"]})
         assert len(results) == 2
         assert all(r.status == "hallucination" for r in results)
-        assert all(r.path == "tags[]" for r in results)
+        # Hallucinated elements get index -1 (no gold counterpart)
+        assert all(r.path == "tags[-1]" for r in results)
 
     def test_gold_empty_extracted_not_list(self) -> None:
         # gold=[], extracted="bad" -> 1 mismatch for the array node
@@ -540,6 +543,128 @@ class TestDeeplyNested:
         omissions = [r for r in results if r.status == "omission"]
         assert len(matched) == 2  # S1's id and value
         assert len(omissions) == 2  # S2's id and value
+
+
+# --- Array Instance paths ---
+
+
+class TestArrayInstancePaths:
+    """FieldResult.path should carry element indices for array elements."""
+
+    def test_flat_array_elements_have_indices(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+        })
+        results = score_record(schema, {"tags": ["a", "b"]}, {"tags": ["a", "b"]})
+        assert results[0].path == "tags[0]"
+        assert results[1].path == "tags[1]"
+
+    def test_array_of_objects_elements_have_indices(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "steps": {"type": "array", "items": {"type": "object", "properties": {
+                    "name": {"type": "string"},
+                    "temp": {"type": "number"},
+                }}},
+            },
+        })
+        gold = {"steps": [{"name": "deposit", "temp": 300}, {"name": "anneal", "temp": 500}]}
+        ext = {"steps": [{"name": "deposit", "temp": 300}, {"name": "anneal", "temp": 999}]}
+        results = score_record(schema, gold, ext)
+        paths = [r.path for r in results]
+        assert "steps[0].name" in paths
+        assert "steps[0].temp" in paths
+        assert "steps[1].name" in paths
+        assert "steps[1].temp" in paths
+
+    def test_omissions_have_indices(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+        })
+        results = score_record(schema, {"tags": ["a", "b", "c"]}, {"tags": ["a"]})
+        assert results[0].path == "tags[0]"  # match
+        assert results[1].path == "tags[1]"  # omission
+        assert results[2].path == "tags[2]"  # omission
+
+    def test_hallucinations_have_indices(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+        })
+        results = score_record(schema, {"tags": ["a"]}, {"tags": ["a", "b", "c"]})
+        assert results[0].path == "tags[0]"  # match
+        assert results[1].path == "tags[-1]"  # hallucination (no gold counterpart)
+        assert results[2].path == "tags[-1]"  # hallucination (no gold counterpart)
+
+    def test_nested_arrays_both_levels_have_indices(self) -> None:
+        """layers[0].steps[1].temp -- each array level gets its own index."""
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "layers": {"type": "array", "items": {"type": "object", "properties": {
+                    "name": {"type": "string"},
+                    "steps": {"type": "array", "items": {"type": "object", "properties": {
+                        "action": {"type": "string"},
+                        "temp": {"type": "number"},
+                    }}},
+                }}},
+            },
+        })
+        gold = {"layers": [
+            {"name": "L1", "steps": [
+                {"action": "deposit", "temp": 300},
+                {"action": "anneal", "temp": 500},
+            ]},
+            {"name": "L2", "steps": [
+                {"action": "etch", "temp": 100},
+            ]},
+        ]}
+        ext = {"layers": [
+            {"name": "L1", "steps": [
+                {"action": "deposit", "temp": 300},
+                {"action": "anneal", "temp": 999},
+            ]},
+            {"name": "L2", "steps": [
+                {"action": "etch", "temp": 100},
+            ]},
+        ]}
+        results = score_record(schema, gold, ext)
+        paths = [r.path for r in results]
+        # Outer array: layers[0], layers[1]
+        assert "layers[0].name" in paths
+        assert "layers[1].name" in paths
+        # Inner array: steps[0], steps[1] under each layer
+        assert "layers[0].steps[0].action" in paths
+        assert "layers[0].steps[0].temp" in paths
+        assert "layers[0].steps[1].action" in paths
+        assert "layers[0].steps[1].temp" in paths
+        assert "layers[1].steps[0].action" in paths
+        assert "layers[1].steps[0].temp" in paths
+        # Verify the mismatch is at the right path
+        mismatch = [r for r in results if r.status == "mismatch"]
+        assert len(mismatch) == 1
+        assert mismatch[0].path == "layers[0].steps[1].temp"
+
+    def test_empty_array_match_uses_array_path_not_element(self) -> None:
+        """[] vs [] is a match on the array node itself, no element index."""
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+        })
+        results = score_record(schema, {"tags": []}, {"tags": []})
+        assert len(results) == 1
+        assert results[0].path == "tags"  # array-level, no index
 
 
 # --- Skip fields ---
