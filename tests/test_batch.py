@@ -24,6 +24,7 @@ from struct_extract_eval.batch.llm_judge import (
 from struct_extract_eval.core.comparators.comparator import (
     BatchItem,
     ComparatorResult,
+    CompoundComparator,
 )
 from struct_extract_eval.core.comparators.registry import (
     _clear_registry,
@@ -256,6 +257,33 @@ class TestProcessBatches:
         assert results[0].score == 1.0  # from A
         assert results[1].score == 0.0  # from B
         assert results[2].score == 1.0  # from A
+
+
+    def test_skip_flag_sets_status_skipped(self) -> None:
+        """ComparatorResult(skip=True) -> process_batches sets status='skipped'."""
+        class SkipHandler:
+            is_batch = True
+            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
+                return [
+                    ComparatorResult(score=1.0, comparator="skipper"),
+                    ComparatorResult(score=0.0, comparator="skipper", reason="supporting", skip=True),
+                ]
+        register("skipper", SkipHandler())
+
+        results = [
+            FieldResult("a", 0.0, "skipper", "g1", "e1", "pending",
+                        gold_compared="g1", extracted_compared="e1",
+                        pending_batch="skipper"),
+            FieldResult("b", 0.0, "skipper", "g2", "e2", "pending",
+                        gold_compared="g2", extracted_compared="e2",
+                        pending_batch="skipper"),
+        ]
+        process_batches(results, _EMPTY_TREE)
+        assert results[0].status == "match"
+        assert results[0].score == 1.0
+        assert results[1].status == "skipped"
+        assert results[1].score == 0.0
+        assert results[1].reason == "supporting"
 
 
 # --- end-to-end via manual semantic registration ---
@@ -500,8 +528,6 @@ class TestQuantityBatchComparatorExample:
 
 
 # --- compound comparator using CompoundComparator base class ---
-
-from struct_extract_eval.core.comparators.comparator import CompoundComparator
 
 
 class NameCompoundComparator(CompoundComparator):

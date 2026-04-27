@@ -34,6 +34,8 @@ def _rewrite_element_paths(
     be rewritten. The parent's ``[]`` is resolved by the parent's array scorer.
     """
     last_bracket = items_path.rfind("[]")
+    if last_bracket == -1:
+        return  # no [] in path — nothing to rewrite
     instance_path = (
         items_path[:last_bracket] + f"[{element_index}]" + items_path[last_bracket + 2:]
     )

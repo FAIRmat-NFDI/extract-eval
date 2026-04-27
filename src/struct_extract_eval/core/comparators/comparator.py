@@ -76,7 +76,7 @@ class Comparator(Protocol):
     """Per-field comparator. One pair in, one result out."""
 
     def __call__(
-        self, gold: Any, extracted: Any, params: dict[str, Any]
+            self, gold: Any, extracted: Any, params: dict[str, Any]
     ) -> ComparatorResult: ...
 
 
@@ -105,45 +105,89 @@ class BatchComparator(Protocol):
     is_batch: bool
 
     def __call__(
-        self, items: list[BatchItem]
+            self, items: list[BatchItem]
     ) -> list[ComparatorResult | None]: ...
 
 
 class CompoundComparator:
-    """Base class for compound comparators that score sibling fields as one unit.
+    """Score multiple sibling fields together as one logical unit.
 
-    Handles all the boilerplate: group-by-parent, field extraction, incomplete
-    group handling, primary/skip result construction. Subclasses only override
-    ``compare()`` with the actual comparison logic.
+    Problem
+    -------
+    Some fields only make sense together. For example, ``surname`` and ``name``
+    form a person's full name. Scoring them independently gives misleading
+    results: if the extractor writes ``{"surname": "Smith", "name": "Jane"}``
+    when gold is ``{"surname": "Smith", "name": "John"}``, independent scoring
+    gives ``surname=1.0`` even though "Smith, Jane" is a different person from
+    "Smith, John".
 
-    Usage::
+    A compound comparator evaluates the full name as one unit: if ANY part is
+    wrong, the whole compound scores 0.
 
+    How it works
+    ------------
+    1. Tag all sibling fields with the same comparator name in the schema.
+    2. The scoring layer defers them as ``pending`` (like any batch comparator).
+    3. ``process_batches`` sends all pending fields to this handler at once.
+    4. This base class groups items by **parent path** (e.g., the object fields
+    `surname` and `name` appear multiple times under different paths), so each
+    object's fields are evaluated as their own unit.
+    5. For each group, it calls your ``compare()`` method with the gold and
+       extracted values as simple dicts.
+    6. The **primary** field gets the compound score (0 or 1).
+    7. All other fields get ``status="skipped"`` -- they contributed to the
+       comparison but are excluded from precision/recall/F1. so that this equals to
+       the compound counts as **1 field** in the metrics, not N.
+
+    What you write
+    --------------
+    Subclass ``CompoundComparator`` and override ``compare()``.
+    The base class handles grouping, field extraction, incomplete groups,
+    and the primary/skip logic.
+
+    Example: full name comparator
+    -----------------------------
         class NameComparator(CompoundComparator):
             def __init__(self):
                 super().__init__(
-                    fields=["surname", "name"],
-                    primary="surname",
-                    name="name_compound",
+                    fields=["surname", "name"],   # sibling fields in the compound
+                    primary="surname",             # this field gets the score
+                    name="name_compound",          # comparator name in results
                 )
 
-            def compare(self, gold: dict[str, object], extracted: dict[str, object]) -> float:
-                g = f"{gold['name']} {gold['surname']}".lower()
-                e = f"{extracted['name']} {extracted['surname']}".lower()
+            def compare(self, gold, extracted):
+                # gold = {"surname": "Smith", "name": "John"}
+                # extracted = {"surname": "Smith", "name": "Jane"}
+                g = f"{gold['name']} {gold['surname']}
+                e = f"{extracted['name']} {extracted['surname']}"
                 return 1.0 if g == e else 0.0
 
         register("name_compound", NameComparator())
 
-    Schema::
+    Schema -- tag both fields with the same comparator name::
 
-        {"surname": {"x-eval-compare": "name_compound"},
-         "name":    {"x-eval-compare": "name_compound"}}
+        {
+          "surname": {"type": "string", "x-eval-compare": "name_compound"},
+          "name":    {"type": "string", "x-eval-compare": "name_compound"}
+        }
 
-    Args:
-        fields: list of sibling field names that form the compound
-            (e.g. ``["surname", "name"]``).
-        primary: which field gets the compound score. Must be in ``fields``.
-            All other fields get ``status="skipped"`` (excluded from metrics).
-        name: comparator name used in ``ComparatorResult.comparator``.
+    Works inside arrays too.
+
+    Other use cases
+    ---------------
+    - **Quantity + unit**: ``fields=["value", "unit"]`` -- convert units before comparing
+    - **Coordinates**: ``fields=["lat", "lon"]`` -- compute distance
+    - **Date + timezone**: ``fields=["date", "tz"]`` -- normalize to UTC
+
+    Parameters
+    ----------
+    fields : list[str]
+        Sibling field names that form the compound (e.g. ``["surname", "name"]``).
+    primary : str
+        Which field gets the compound score. Must be in ``fields``.
+        All other fields get ``status="skipped"`` (excluded from metrics).
+    name : str
+        Comparator name used in ``ComparatorResult.comparator`` and error messages.
     """
 
     is_batch = True
@@ -158,22 +202,25 @@ class CompoundComparator:
         self.name = name
 
     def compare(
-        self, gold: dict[str, object], extracted: dict[str, object]
+            self, gold: dict[str, object], extracted: dict[str, object]
     ) -> float:
-        """Override this. Return a score in [0.0, 1.0].
+        """Override this with your comparison logic. Return a score in [0.0, 1.0].
 
-        ``gold`` and ``extracted`` are dicts mapping field name to the
-        post-transform value for each sibling field in the compound group.
+        You receive two dicts, each mapping field name to the post-transform
+        value. The keys are exactly the ``fields`` you declared in ``__init__``.
 
-        Example for fields=["surname", "name"]::
+        Example -- if ``fields=["surname", "name"]``::
 
             gold      = {"surname": "Smith", "name": "John"}
             extracted = {"surname": "Smith", "name": "Jane"}
+
+        Return 1.0 if the compound matches, 0.0 if it doesn't.
+        The base class applies this score to the primary field and skips the rest.
         """
         raise NotImplementedError
 
     def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
-        # Group items by parent path
+        # Group items by parent path of this compound key
         by_parent: dict[str, list[tuple[int, BatchItem]]] = {}
         for i, item in enumerate(items):
             parent = item.path.rsplit(".", 1)[0] if "." in item.path else ""
@@ -191,6 +238,7 @@ class CompoundComparator:
                 fields[field_name] = (idx, item)
 
             # Check all expected fields are present
+            # todo: rethink if do it this way or its ok to have missing key as long as the gold==extracted
             missing = [f for f in self.fields if f not in fields]
             if missing:
                 for idx, _ in group:
@@ -223,7 +271,7 @@ class CompoundComparator:
                     result_by_index[idx] = ComparatorResult(
                         score=0.0,
                         comparator=self.name,
-                        reason=f"compound with {parent}.{self.primary}",
+                        reason=f"compound with {parent + '.' if parent else ''}{self.primary}",
                         skip=True,
                     )
 
