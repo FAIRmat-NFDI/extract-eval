@@ -27,6 +27,7 @@ Batch errors are EXCLUDED from precision/recall/F1, like skipped fields.
 """
 
 import logging
+import re
 
 from struct_extract_eval.core.comparators.comparator import (
     BatchItem,
@@ -37,6 +38,15 @@ from struct_extract_eval.core.schema import SchemaNode
 from struct_extract_eval.core.scoring import FieldResult
 
 logger = logging.getLogger(__name__)
+
+
+def _to_schema_path(path: str) -> str:
+    """Normalize an instance path back to a schema path for path_map lookup.
+
+    ``"students[0].surname"`` -> ``"students[].surname"``
+    ``"layers[2].steps[-1].name"`` -> ``"layers[].steps[].name"``
+    """
+    return re.sub(r"\[-?\d+\]", "[]", path)
 
 
 def _build_path_map(tree: SchemaNode) -> dict[str, SchemaNode]:
@@ -110,7 +120,9 @@ def process_batches(
                 extracted_raw=r.extracted_value,
                 gold_compared=r.gold_compared,
                 extracted_compared=r.extracted_compared,
-                params=path_map[r.path].comparator.params if r.path in path_map else {},
+                params=path_map[_to_schema_path(r.path)].comparator.params
+                if _to_schema_path(r.path) in path_map
+                else {},
             )
             for r in results
         ]

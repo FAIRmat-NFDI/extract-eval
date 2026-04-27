@@ -76,7 +76,7 @@ class Comparator(Protocol):
     """Per-field comparator. One pair in, one result out."""
 
     def __call__(
-            self, gold: Any, extracted: Any, params: dict[str, Any]
+        self, gold: Any, extracted: Any, params: dict[str, Any],
     ) -> ComparatorResult: ...
 
 
@@ -105,7 +105,7 @@ class BatchComparator(Protocol):
     is_batch: bool
 
     def __call__(
-            self, items: list[BatchItem]
+        self, items: list[BatchItem],
     ) -> list[ComparatorResult | None]: ...
 
 
@@ -158,7 +158,7 @@ class CompoundComparator:
             def compare(self, gold, extracted):
                 # gold = {"surname": "Smith", "name": "John"}
                 # extracted = {"surname": "Smith", "name": "Jane"}
-                g = f"{gold['name']} {gold['surname']}
+                g = f"{gold['name']} {gold['surname']}"
                 e = f"{extracted['name']} {extracted['surname']}"
                 return 1.0 if g == e else 0.0
 
@@ -202,7 +202,7 @@ class CompoundComparator:
         self.name = name
 
     def compare(
-            self, gold: dict[str, object], extracted: dict[str, object]
+        self, gold: dict[str, object], extracted: dict[str, object],
     ) -> float:
         """Override this with your comparison logic. Return a score in [0.0, 1.0].
 
