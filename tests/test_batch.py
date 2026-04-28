@@ -654,6 +654,54 @@ class TestNameCompoundComparator:
         assert record.f1 == 1.0
 
 
+    def test_compound_inside_array(self) -> None:
+        """Compound comparator works inside arrays via instance paths.
+
+        Each array element gets its own group (students[0] vs students[1])
+        so the handler pairs each element's fields correctly.
+        """
+        register("name_compound", NameCompoundComparator())
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "students": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "family_name": {"type": "string", "x-eval-compare": "name_compound"},
+                            "given_name": {"type": "string", "x-eval-compare": "name_compound"},
+                        },
+                    },
+                },
+            },
+        }
+        gold = [{"students": [
+            {"family_name": "Smith", "given_name": "John"},
+            {"family_name": "Kim", "given_name": "Soo"},
+        ]}]
+        ext = [{"students": [
+            {"family_name": "Smith", "given_name": "Jane"},  # wrong name
+            {"family_name": "Kim", "given_name": "Soo"},     # correct
+        ]}]
+
+        result = evaluate(gold, ext, schema=schema)
+        record = result.records[0]
+        by_path = {r.path: r for r in record.field_results}
+
+        # Element 0: wrong name -> mismatch on primary, skip on supporting
+        assert by_path["students[0].family_name"].status == "mismatch"
+        assert by_path["students[0].given_name"].status == "skipped"
+
+        # Element 1: correct -> match on primary, skip on supporting
+        assert by_path["students[1].family_name"].status == "match"
+        assert by_path["students[1].given_name"].status == "skipped"
+
+        # 2 fields scored (one per element's primary), not 4
+        scored = [r for r in record.field_results if r.status != "skipped"]
+        assert len(scored) == 2
+
+
 # --- CompoundComparator base class ---
 
 

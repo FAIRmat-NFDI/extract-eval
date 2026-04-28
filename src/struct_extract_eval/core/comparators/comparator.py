@@ -136,8 +136,8 @@ class CompoundComparator:
        extracted values as simple dicts.
     6. The **primary** field gets the compound score (0 or 1).
     7. All other fields get ``status="skipped"`` -- they contributed to the
-       comparison but are excluded from precision/recall/F1. so that this equals to
-       the compound counts as **1 field** in the metrics, not N.
+       comparison but are excluded from precision/recall/F1 metrics.
+       The compound counts as **1 field** in the metrics, not N.
 
     What you write
     --------------

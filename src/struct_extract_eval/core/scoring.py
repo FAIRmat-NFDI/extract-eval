@@ -25,13 +25,21 @@ def _rewrite_element_paths(
 ) -> None:
     """Rewrite schema paths to instance paths for array element results.
 
-    Replaces the LAST ``[]`` in items_path with the element index:
-    ``"steps[].name"`` -> ``"steps[0].name"``
-    ``"layers[].steps[].name"`` -> ``"layers[].steps[0].name"``
+    ``items_path`` is the items node's schema path (e.g. ``"steps[]"`` or
+    ``"layers[].steps[]"``). This function replaces the LAST ``[]`` in that
+    prefix with the element index, then applies the same replacement to every
+    FieldResult path that starts with the prefix.
 
-    ``items_path`` is needed to know WHICH ``[]`` to replace -- in nested
-    arrays a path has multiple ``[]`` and only the current level should
-    be rewritten. The parent's ``[]`` is resolved by the parent's array scorer.
+    Examples (items_path -> what happens to FieldResult.path):
+
+    - items_path=``"steps[]"``, index=0:
+      ``"steps[]"``      -> ``"steps[0]"``
+      ``"steps[].name"`` -> ``"steps[0].name"``
+
+    - items_path=``"layers[].steps[]"``, index=1:
+      ``"layers[].steps[]"``      -> ``"layers[].steps[1]"``
+      ``"layers[].steps[].name"`` -> ``"layers[].steps[1].name"``
+      (the parent ``layers[]`` is left for the outer array scorer to resolve)
     """
     last_bracket = items_path.rfind("[]")
     if last_bracket == -1:

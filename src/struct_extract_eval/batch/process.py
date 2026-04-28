@@ -113,19 +113,18 @@ def process_batches(
             _mark_all_error(results)
             continue
 
-        items = [
-            BatchItem(
+        items = []
+        for r in results:
+            schema_path = _to_schema_path(r.path)
+            node = path_map.get(schema_path)
+            items.append(BatchItem(
                 path=r.path,
                 gold_raw=r.gold_value,
                 extracted_raw=r.extracted_value,
                 gold_compared=r.gold_compared,
                 extracted_compared=r.extracted_compared,
-                params=path_map[_to_schema_path(r.path)].comparator.params
-                if _to_schema_path(r.path) in path_map
-                else {},
-            )
-            for r in results
-        ]
+                params=node.comparator.params if node else {},
+            ))
 
         try:
             outputs = fn(items)
