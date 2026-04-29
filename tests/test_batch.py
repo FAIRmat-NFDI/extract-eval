@@ -313,7 +313,7 @@ class TestEvaluateWithSemanticRegistration:
         assert result.mean_f1 == 1.0
 
     def test_unregistered_semantic_raises_at_parse(self) -> None:
-        # If "semantic" is referenced but no handler is registered, parse_schema
+        # If "semantic" is referenced but no handler is registered, parse_eval_schema
         # raises with the missing comparator name in the message.
         from struct_extract_eval.core.schema import SchemaError
         schema: dict[str, object] = {

@@ -26,7 +26,7 @@ from struct_extract_eval.core.record import (
     build_record_result,
     build_run_result,
 )
-from struct_extract_eval.core.schema import SchemaNode, parse_schema
+from struct_extract_eval.core.schema import SchemaNode, parse_eval_schema
 from struct_extract_eval.core.scoring import score_record
 
 
@@ -92,7 +92,7 @@ def evaluate(
             f"got {len(gold)} and {len(extracted)}"
         )
 
-    tree = parse_schema(deepcopy(schema))
+    tree = parse_eval_schema(deepcopy(schema))
     pairs: list[tuple[str | int, dict[str, object], dict[str, object]]] = [
         (g[id_field] if id_field else i, g, e)
         for i, (g, e) in enumerate(zip(gold, extracted, strict=True))

@@ -1,9 +1,9 @@
-"""SchemaNode tree and parse_schema.
+"""SchemaNode tree and parse_eval_schema.
 
 Parses an eval schema (resolved schema + x-eval-* extensions) into a
 SchemaNode tree. All downstream scoring code works with SchemaNode.
 
-Call annotate_xeval() to get eval schema -- parse_schema
+Call annotate_xeval() to get eval schema -- parse_eval_schema
 does not assign comparator defaults for leaf nodes, it validates
 and parses. Container nodes (objects/arrays) get a placeholder
 comparator since they are scored via their children, not directly.
@@ -251,7 +251,7 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
     return node
 
 
-def parse_schema(raw_schema: dict[str, object]) -> SchemaNode:
+def parse_eval_schema(raw_schema: dict[str, object]) -> SchemaNode:
     """Parse an eval schema into a SchemaNode tree.
 
     Expects:

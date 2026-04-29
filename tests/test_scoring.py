@@ -1,12 +1,12 @@
 from struct_extract_eval.core.scoring import score_record
-from struct_extract_eval.core.schema import parse_schema
+from struct_extract_eval.core.schema import parse_eval_schema
 from struct_extract_eval.core.xeval import annotate_xeval
 
 
 def _make_schema(raw: dict[str, object]) -> "SchemaNode":  # noqa: F821
     """Helper: add defaults + parse into SchemaNode."""
     annotate_xeval(raw)
-    return parse_schema(raw)
+    return parse_eval_schema(raw)
 
 
 # --- Flat objects ---
