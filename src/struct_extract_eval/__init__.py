@@ -9,12 +9,17 @@ from struct_extract_eval.core.record import (
     RecordResult,
     RunResult,
 )
-from struct_extract_eval.core.schema import SchemaNode, parse_schema
+from struct_extract_eval.core.schema import SchemaNode, parse_eval_schema
 from struct_extract_eval.core.schema_inference import infer_schema
 from struct_extract_eval.core.scoring import FieldResult, score_record
 from struct_extract_eval.core.transforms.transform import TransformSpec
 from struct_extract_eval.core.validation import GoldValidationError, validate_gold
-from struct_extract_eval.core.xeval import annotate_xeval, parse_xeval_entry, set_type_default
+from struct_extract_eval.core.xeval import (
+    annotate_xeval,
+    parse_xeval_entry,
+    reset_type_defaults,
+    set_type_default,
+)
 from struct_extract_eval.evaluator import evaluate
 
 __all__ = [
@@ -29,9 +34,10 @@ __all__ = [
     "TransformSpec",
     "annotate_xeval",
     "evaluate",
+    "reset_type_defaults",
     "set_type_default",
     "infer_schema",
-    "parse_schema",
+    "parse_eval_schema",
     "parse_xeval_entry",
     "score_record",
     "validate_gold",

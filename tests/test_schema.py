@@ -7,7 +7,7 @@ from struct_extract_eval.core.schema import (
     SchemaError,
     SchemaNode,
     _validate_xeval,
-    parse_schema,
+    parse_eval_schema,
 )
 from struct_extract_eval.core.transforms.transform import TransformSpec
 
@@ -130,7 +130,7 @@ class TestValidateXeval:
             },
         }
         with pytest.raises(SchemaError, match="params for 'numeric' must be a dict"):
-            parse_schema(schema)
+            parse_eval_schema(schema)
 
     def test_unknown_xeval_key_warns(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.WARNING):
@@ -150,7 +150,7 @@ class TestValidateXeval:
         assert "Unknown x-eval key" in caplog.text
 
 
-# --- parse_schema ---
+# --- parse_eval_schema ---
 
 
 class TestParseSchema:
@@ -162,7 +162,7 @@ class TestParseSchema:
                 "name": {"type": "string", "x-eval-compare": "exact"},
             },
         }
-        root = parse_schema(schema)
+        root = parse_eval_schema(schema)
         assert root.json_type == "object"
         assert root.path == ""
         assert len(root.children) == 1
@@ -254,7 +254,7 @@ class TestParseSchema:
             },
         }
         with pytest.raises(SchemaError, match="missing x-eval-compare"):
-            parse_schema(schema)
+            parse_eval_schema(schema)
 
     def test_nested_objects(self) -> None:
         schema: dict[str, object] = {
@@ -270,7 +270,7 @@ class TestParseSchema:
                 },
             },
         }
-        root = parse_schema(schema)
+        root = parse_eval_schema(schema)
         outer = root.children[0]
         assert outer.path == "outer"
         inner = outer.children[0]
@@ -322,7 +322,7 @@ class TestParseSchema:
 
     def test_missing_type_raises(self) -> None:
         with pytest.raises(SchemaError, match="Missing or invalid 'type'"):
-            parse_schema(
+            parse_eval_schema(
                 {
                     "x-eval-compare": "exact",
                     "properties": {"x": {"type": "string", "x-eval-compare": "exact"}},
@@ -338,11 +338,11 @@ class TestParseSchema:
             },
         }
         with pytest.raises(SchemaError, match="Unknown comparator"):
-            parse_schema(schema)
+            parse_eval_schema(schema)
 
     def test_not_a_dict_raises(self) -> None:
         with pytest.raises(SchemaError, match="Eval schema must be an object"):
-            parse_schema("not a dict")  # type: ignore[arg-type]
+            parse_eval_schema("not a dict")  # type: ignore[arg-type]
 
     def test_unresolved_ref_raises(self) -> None:
         schema: dict[str, object] = {
@@ -353,7 +353,7 @@ class TestParseSchema:
             },
         }
         with pytest.raises(SchemaError, match="Missing or invalid 'type'"):
-            parse_schema(schema)
+            parse_eval_schema(schema)
 
     def test_deeply_nested(self) -> None:
         schema: dict[str, object] = {
@@ -387,7 +387,7 @@ class TestParseSchema:
                 },
             },
         }
-        root = parse_schema(schema)
+        root = parse_eval_schema(schema)
         layers = root.children[0]
         layer_item = layers.children[0]
         steps = next(c for c in layer_item.children if c.path == "layers[].steps")
@@ -402,7 +402,7 @@ class TestParseSchema:
 
 def _root_child(schema: dict[str, object], name: str) -> SchemaNode:
     """Parse schema and return the named child of the root node."""
-    root = parse_schema(schema)
+    root = parse_eval_schema(schema)
     for child in root.children:
         if child.path == name:
             return child

@@ -48,6 +48,21 @@ def set_type_default(json_type: str, comparator: str) -> None:
     _BUILTIN_TYPE_DEFAULTS[json_type] = comparator
 
 
+def reset_type_defaults() -> None:
+    """Reset the type-defaults mapping to the built-in defaults.
+
+    Undoes all ``set_type_default()`` calls. Useful in tests or when
+    switching between configurations in the same process.
+    """
+    _BUILTIN_TYPE_DEFAULTS.clear()
+    _BUILTIN_TYPE_DEFAULTS.update({
+        "string": "exact",
+        "number": "numeric",
+        "integer": "numeric",
+        "boolean": "exact",
+    })
+
+
 def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, object]]:
     """Parse the two-shape config rule into ``(function name, function params)``.
 
@@ -87,8 +102,8 @@ def annotate_xeval(schema: dict[str, object]) -> dict[str, object]:
     the internal type-defaults mapping. Use ``set_type_default()`` to
     customize the mapping before calling.
 
-    The JSON Schema ``required`` array is removed since the eval schema
-    does not use it.
+    Other keys in the schema (e.g. ``required``, ``type``, ``properties``)
+    are left untouched.
 
     Returns:
         The schema for convenience (same object, mutated in-place).
@@ -109,6 +124,3 @@ def _annotate_node(schema: dict[str, object]) -> None:
     # Container node (object or array): recurse into children.
     for _field_name, child_schema, _child_path in get_children(schema):
         _annotate_node(child_schema)
-
-    # Remove the JSON Schema required array -- eval schema doesn't use it.
-    schema.pop("required", None)

@@ -233,14 +233,26 @@ What changed:
 - `method` added `lowercase` + `strip` transforms for normalization.
 - `temperature` now has a 5% relative tolerance, so 300 vs 315 would still score 1.
 
-### Step 4: Run Evaluation
+### Step 4: Validate
 
 ```python
 import json
-from struct_extract_eval import evaluate
+from struct_extract_eval import parse_eval_schema, validate_gold
 
 with open("eval_schema.json") as f:
     eval_schema = json.load(f)
+
+# Validate the eval schema (raises SchemaError if invalid)
+parse_eval_schema(eval_schema)
+
+# Validate gold against the schema (warns about missing/extra fields)
+validate_gold(gold, eval_schema)
+```
+
+### Step 5: Run Evaluation
+
+```python
+from struct_extract_eval import evaluate
 
 result = evaluate(
     gold=gold,
@@ -518,11 +530,30 @@ with.
 | Function                                       | Purpose                                                          |
 |------------------------------------------------|------------------------------------------------------------------|
 | `infer_schema(instances)`                      | Infer resolved schema from gold instances                        |
-| `add_default_xeval(schema)`                    | Annotate a resolved schema with `x-eval-*` defaults (in-place)   |
+| `annotate_xeval(schema)`                       | Annotate a resolved schema with `x-eval-*` defaults (in-place)   |
+| `set_type_default(json_type, comparator)`      | Change the default comparator for a JSON type                    |
+| `reset_type_defaults()`                        | Reset type-defaults mapping to built-in defaults                 |
+| `parse_eval_schema(schema)`                         | Parse and validate eval schema, returns SchemaNode tree          |
+| `validate_gold(gold, schema, ...)`             | Validate gold data against schema (type errors, missing/extra warnings) |
 | `evaluate(gold, extracted, schema, id_field?)` | Evaluate gold vs extracted using a reviewed eval schema          |
-| `parse_schema(schema)`                         | Parse an eval schema into the internal tree representation       |
 
-`evaluate()` requires an eval schema -- you must generate and review it before calling.
+`evaluate()` requires an eval schema -- you must annotate and review it before calling.
+
+### Validation
+
+Two separate steps, run before `evaluate()`:
+
+```python
+from struct_extract_eval import parse_eval_schema, validate_gold
+
+# 1. Parse and validate the eval schema (types, comparator names, x-eval-* syntax)
+parse_eval_schema(eval_schema)  # raises SchemaError if invalid
+
+# 2. Check gold data against the schema
+validate_gold(gold, eval_schema)                        # type errors + all warnings
+validate_gold(gold, eval_schema, warn_missing=False)    # suppress missing-field warnings
+validate_gold(gold, eval_schema, warn_extra=False)      # suppress extra-field warnings
+```
 
 ---
 

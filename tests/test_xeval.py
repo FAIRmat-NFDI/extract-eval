@@ -147,8 +147,8 @@ class TestAnnotateXeval:
             _BUILTIN_TYPE_DEFAULTS.clear()
             _BUILTIN_TYPE_DEFAULTS.update(original)
 
-    def test_required_array_removed(self) -> None:
-        """The JSON Schema 'required' array is removed by annotate_xeval."""
+    def test_required_array_preserved(self) -> None:
+        """annotate_xeval does not remove or modify the required array."""
         schema: dict[str, object] = {
             "type": "object",
             "required": ["name"],
@@ -158,7 +158,7 @@ class TestAnnotateXeval:
             },
         }
         annotate_xeval(schema)
-        assert "required" not in schema
+        assert schema["required"] == ["name"]
 
     def test_nested_object(self) -> None:
         schema: dict[str, object] = {
@@ -177,8 +177,6 @@ class TestAnnotateXeval:
         annotate_xeval(schema)
         sample = schema["properties"]["sample"]  # type: ignore[index]
         assert sample["properties"]["name"]["x-eval-compare"] == "exact"
-        # required array is removed at all levels
-        assert "required" not in sample
 
     def test_array_items(self) -> None:
         schema: dict[str, object] = {
@@ -217,8 +215,6 @@ class TestAnnotateXeval:
         item_props = items["properties"]
         assert item_props["name"]["x-eval-compare"] == "exact"
         assert item_props["duration"]["x-eval-compare"] == "numeric"
-        # required array is removed from items schema
-        assert "required" not in items
 
     def test_deeply_nested(self) -> None:
         schema: dict[str, object] = {
