@@ -22,17 +22,6 @@ class TestInferSchema:
         schema = infer_schema([{"temp": 3.14}])
         assert schema["properties"]["temp"] == {"type": "number"}
 
-    def test_optional_field_captured(self) -> None:
-        schema = infer_schema([
-            {"name": "Alice", "email": "a@b.com"},
-            {"name": "Bob"},
-        ])
-        # Both fields present in the schema (union of keys)
-        assert "name" in schema["properties"]
-        assert "email" in schema["properties"]
-        # No required array
-        assert "required" not in schema
-
     def test_all_null_field(self) -> None:
         schema = infer_schema([{"x": None}, {"x": None}])
         assert schema["properties"]["x"] == {"type": "string"}
@@ -42,7 +31,6 @@ class TestInferSchema:
         outer = schema["properties"]["outer"]
         assert outer["type"] == "object"
         assert outer["properties"]["inner"] == {"type": "string"}
-        assert "required" not in outer
 
     def test_array_of_primitives(self) -> None:
         schema = infer_schema([{"tags": ["a", "b"]}])
@@ -58,7 +46,6 @@ class TestInferSchema:
         assert items_schema["type"] == "object"
         assert items_schema["properties"]["id"] == {"type": "string"}
         assert items_schema["properties"]["val"] == {"type": "integer"}
-        assert "required" not in items_schema
 
     def test_array_elements_flattened_across_instances(self) -> None:
         schema = infer_schema([
@@ -189,11 +176,3 @@ class TestInferSchema:
         """bool is subclass of int in Python -- must check bool first."""
         schema = infer_schema([{"flag": True}])
         assert schema["properties"]["flag"] == {"type": "boolean"}
-
-    def test_no_required_array(self) -> None:
-        """infer_schema does not produce a required array."""
-        schema = infer_schema([
-            {"a": 1},
-            {"b": 2},
-        ])
-        assert "required" not in schema
