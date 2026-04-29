@@ -102,8 +102,8 @@ def annotate_xeval(schema: dict[str, object]) -> dict[str, object]:
     the internal type-defaults mapping. Use ``set_type_default()`` to
     customize the mapping before calling.
 
-    The JSON Schema ``required`` array is removed since the eval schema
-    does not use it.
+    Other keys in the schema (e.g. ``required``, ``type``, ``properties``)
+    are left untouched.
 
     Returns:
         The schema for convenience (same object, mutated in-place).
