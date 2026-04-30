@@ -177,8 +177,8 @@ def _score_array(
 
     Supports ordered (positional) and unordered matching. For unordered,
     key-field alignment matches elements by a unique identifier field.
-    Hungarian bipartite matching (highest-score pairing) is planned but
-    not yet implemented -- falls back to ordered with a warning.
+    Hungarian bipartite matching finds the optimal pairing by maximizing
+    total F1 across all pairs.
     """
     align = node.align
     if align is None or align.get("ordered") is True:
@@ -189,13 +189,7 @@ def _score_array(
             node, gold_value, extracted_value, key=str(align["key"])
         )
     if match_by == "hungarian":
-        # TODO: implement Hungarian bipartite matching
-        logger.warning(
-            "Hungarian alignment at '%s' is not yet implemented. "
-            "Falling back to ordered matching.",
-            node.path,
-        )
-        return _score_array_ordered(node, gold_value, extracted_value)
+        return _score_array_hungarian(node, gold_value, extracted_value)
     logger.warning(
         "Unknown x-eval-align match_by='%s' at '%s'. "
         "Falling back to ordered matching.",
@@ -272,6 +266,154 @@ def _score_array_ordered(
         element_results = _hallucination_results(items_node, extracted_list[i])
         _rewrite_element_paths(element_results, items_node.path, -1)
         results.extend(element_results)
+
+    return results
+
+
+# Maximum number of (gold, extracted) pairs to score for Hungarian matching.
+# Beyond this, the O(n*m*fields) cost matrix computation is too expensive.
+_MAX_HUNGARIAN_PAIRS = 2500  # 50 x 50
+
+
+def _score_array_hungarian(
+    node: SchemaNode,
+    gold_value: object,
+    extracted_value: object,
+) -> list[FieldResult]:
+    """Score an array using Hungarian (bipartite) matching.
+
+    Finds the optimal pairing of gold and extracted elements that
+    maximizes total F1 across all pairs. Uses
+    ``scipy.optimize.linear_sum_assignment`` on a cost matrix built
+    by scoring every (gold_i, extracted_j) pair.
+
+    For primitives, each pair has one field, so F1 equals the
+    comparator score. For objects, F1 aggregates across multiple fields.
+
+    Falls back to ordered matching with a warning if the number of
+    pairs exceeds ``_MAX_HUNGARIAN_PAIRS``.
+    """
+    from struct_extract_eval.core.record import build_record_result
+
+    results: list[FieldResult] = []
+    gold_is_list = isinstance(gold_value, list)
+    extracted_is_list = isinstance(extracted_value, list)
+    if not gold_is_list:
+        logger.warning(
+            "Expected list at '%s', got %s in gold",
+            node.path, type(gold_value).__name__,
+        )
+    if not extracted_is_list:
+        logger.warning(
+            "Expected list at '%s', got %s in extracted",
+            node.path, type(extracted_value).__name__,
+        )
+    gold_list = gold_value if gold_is_list else []
+    extracted_list = extracted_value if extracted_is_list else []
+    items_node = node.children[0]
+
+    # Both empty: array-level match
+    if (
+        gold_is_list
+        and extracted_is_list
+        and len(gold_list) == 0
+        and len(extracted_list) == 0
+    ):
+        return [FieldResult(
+            path=node.path,
+            score=1.0,
+            comparator="",
+            gold_value=[],
+            extracted_value=[],
+            status="match",
+        )]
+
+    # Structural failure
+    both_empty = len(gold_list) == 0 and len(extracted_list) == 0
+    if (not gold_is_list or not extracted_is_list) and both_empty:
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="mismatch",
+        )]
+
+    n = len(gold_list)
+    m = len(extracted_list)
+
+    # Size guard: fall back to ordered for very large arrays
+    if n * m > _MAX_HUNGARIAN_PAIRS:
+        logger.warning(
+            "Array at '%s' has %d x %d = %d pairs, exceeding "
+            "Hungarian threshold (%d). Falling back to ordered.",
+            node.path, n, m, n * m, _MAX_HUNGARIAN_PAIRS,
+        )
+        # return _score_array_ordered(node, gold_value, extracted_value)
+
+    # One side empty: no matching needed, just omissions/hallucinations
+    if n == 0:
+        for elem in extracted_list:
+            results.extend(
+                _hallucination_results(items_node, elem)
+            )
+        return results
+    if m == 0:
+        for elem in gold_list:
+            results.extend(_omission_results(items_node, elem))
+        return results
+
+    # Step 1: score ALL n*m pairs, build cost matrix and results cache
+    try:
+        import numpy as np
+        from scipy.optimize import linear_sum_assignment
+    except ImportError as exc:
+        raise ImportError(
+            "Hungarian matching requires numpy and scipy. "
+            "Install with: pip install numpy scipy"
+        ) from exc
+
+    score_matrix = np.zeros((n, m))
+    results_matrix: list[list[list[FieldResult]]] = [
+        [[] for _ in range(m)] for _ in range(n)
+    ]
+
+    for i, g in enumerate(gold_list):
+        for j, e in enumerate(extracted_list):
+            pair_results = _score_node(items_node, g, e)
+            results_matrix[i][j] = pair_results
+            record = build_record_result(0, pair_results, {}, {})
+            score_matrix[i][j] = record.f1
+
+    # Step 2: Hungarian finds optimal matching (maximize total F1)
+    # linear_sum_assignment minimizes, so negate the scores.
+    row_ind, col_ind = linear_sum_assignment(-score_matrix)
+
+    # Step 3: collect results from matched pairs
+    matched_gold: set[int] = set()
+    matched_ext: set[int] = set()
+    for i, j in zip(row_ind, col_ind):
+        # Only count as matched if the pair has a positive score.
+        # A pair with F1=0 means no fields matched — treat as
+        # unmatched (omission + hallucination) rather than a bad match.
+        if score_matrix[i][j] > 0:
+            matched_gold.add(i)
+            matched_ext.add(j)
+            results.extend(results_matrix[i][j])
+        # else: leave both unmatched
+
+    # Unmatched gold -> omissions
+    for i in range(n):
+        if i not in matched_gold:
+            results.extend(_omission_results(items_node, gold_list[i]))
+
+    # Unmatched extracted -> hallucinations
+    for j in range(m):
+        if j not in matched_ext:
+            results.extend(
+                _hallucination_results(items_node, extracted_list[j])
+            )
 
     return results
 

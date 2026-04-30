@@ -258,7 +258,9 @@ def parse_eval_schema(raw_schema: dict[str, object]) -> SchemaNode:
     - $ref and allOf resolved by the caller
     - x-eval-* defaults filled in by annotate_xeval
 
-    Validates all x-eval-* keys at parse time. Does not assign defaults.
+    Validates all x-eval-* keys at parse time: unknown comparators,
+    unknown transforms, invalid types, bad x-eval-* config all raise
+    SchemaError immediately. Does not assign defaults.
     """
     if not isinstance(raw_schema, dict):
         raise SchemaError("Eval schema must be an object")
