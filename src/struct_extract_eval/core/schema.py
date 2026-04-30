@@ -111,7 +111,7 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
                     f"{sorted(_VALID_MATCH_BY)}, got {match_by!r}",
                     path,
                 )
-        if match_by == "key_field": # if the match_by is hangarian, we do not check if the "key" exists or not, existing key will not warn or error.
+        if match_by == "key_field":
             if "key" not in raw_align:
                 raise SchemaError(
                     "x-eval-align with match_by='key_field' "
@@ -124,16 +124,40 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
                     "x-eval-align 'key' must be a non-empty string",
                     path,
                 )
-            # Check the key field exists in the items schema
+            # Validate key field against items schema.
+            # Errors for structurally impossible cases.
+            # Warns when matching might work on data but schema is incomplete,
+            # for example, array have object type, without items property,
+            # match_by key comparator cannot check if the key exists.
             items_schema = schema.get("items")
-            if isinstance(items_schema, dict):
-                items_props = items_schema.get("properties")
-                if isinstance(items_props, dict) and key_name not in items_props:
-                    raise SchemaError(
-                        f"x-eval-align key '{key_name}' not found in "
-                        f"items properties {sorted(items_props)}",
-                        path,
-                    )
+            if not isinstance(items_schema, dict):
+                raise SchemaError(
+                    "x-eval-align with match_by='key_field' requires "
+                    "'items' to be an object schema",
+                    path,
+                )
+            items_type = resolve_type(items_schema)
+            if items_type is not None and items_type != "object":
+                raise SchemaError(
+                    f"x-eval-align with match_by='key_field' requires "
+                    f"items type 'object', got '{items_type}'",
+                    path,
+                )
+            items_props = items_schema.get("properties")
+            if not isinstance(items_props, dict):
+                logger.warning(
+                    "Path '%s': x-eval-align match_by='key_field' but items "
+                    "has no 'properties'. Key-field matching will attempt to "
+                    "match on data, but no per-field scoring is possible.",
+                    path,
+                )
+            elif key_name not in items_props:
+                logger.warning(
+                    "Path '%s': x-eval-align key '%s' not found in items "
+                    "properties %s. Key-field matching will attempt to match "
+                    "on data anyway.",
+                    path, key_name, sorted(items_props),
+                )
 
     if "x-eval-compare" in schema:
         raw_compare = schema["x-eval-compare"]

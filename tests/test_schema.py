@@ -397,6 +397,101 @@ class TestParseSchema:
         assert duration.comparator.name == "numeric"
 
 
+# --- x-eval-align key_field validation ---
+
+
+class TestKeyFieldValidation:
+    def test_key_field_not_in_items_properties_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Key not in properties -> warns (schema incomplete, matching may still work on data)."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "key_field", "key": "name"},
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string", "x-eval-compare": "exact"},
+                        },
+                    },
+                },
+            },
+        }
+        with caplog.at_level(logging.WARNING):
+            parse_eval_schema(schema)
+        assert "key 'name' not found" in caplog.text
+
+    def test_key_field_items_missing_raises(self) -> None:
+        """Items missing entirely -> error (can't score array elements at all)."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "key_field", "key": "name"},
+                },
+            },
+        }
+        with pytest.raises(SchemaError, match="requires 'items'"):
+            parse_eval_schema(schema)
+
+    def test_key_field_items_primitive_type_raises(self) -> None:
+        """Items is a primitive type (string) -> error (key_field needs objects)."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "key_field", "key": "name"},
+                    "items": {"type": "string", "x-eval-compare": "exact"},
+                },
+            },
+        }
+        with pytest.raises(SchemaError, match="requires items type 'object'"):
+            parse_eval_schema(schema)
+
+    def test_key_field_items_no_properties_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Opaque object (no properties) -> warns (matching may work, no per-field scoring)."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "key_field", "key": "name"},
+                    "items": {"type": "object", "x-eval-compare": "exact"},
+                },
+            },
+        }
+        with caplog.at_level(logging.WARNING):
+            parse_eval_schema(schema)
+        assert "no 'properties'" in caplog.text
+
+    def test_key_field_valid_passes(self) -> None:
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "key_field", "key": "name"},
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "x-eval-compare": "exact"},
+                            "temp": {"type": "number", "x-eval-compare": "numeric"},
+                        },
+                    },
+                },
+            },
+        }
+        root = parse_eval_schema(schema)
+        assert root.children[0].align == {"match_by": "key_field", "key": "name"}
+
+
 # --- Test helpers ---
 
 

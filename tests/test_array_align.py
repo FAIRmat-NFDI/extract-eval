@@ -9,7 +9,7 @@ Covers:
 
 import pytest
 
-from struct_extract_eval.core.schema import SchemaError, parse_schema
+from struct_extract_eval.core.schema import SchemaError, parse_eval_schema
 from struct_extract_eval.core.scoring import score_record
 from struct_extract_eval.core.xeval import annotate_xeval
 from struct_extract_eval.evaluator import evaluate
@@ -17,7 +17,7 @@ from struct_extract_eval.evaluator import evaluate
 
 def _make_schema(raw: dict[str, object]) -> "SchemaNode":
     annotate_xeval(raw)
-    return parse_schema(raw)
+    return parse_eval_schema(raw)
 
 
 # --- Schema validation ---
