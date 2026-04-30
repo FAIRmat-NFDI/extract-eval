@@ -414,48 +414,44 @@ class TestArrayTypeErrors:
         })
 
     def test_gold_list_extracted_not_list(self) -> None:
-        # gold=[a,b], extracted="bad" -> 2 omissions per element
+        # gold=[a,b], extracted="bad" -> skipped (invalid extracted type)
         schema = self._schema()
         results = score_record(schema, {"tags": ["a", "b"]}, {"tags": "bad"})
-        assert len(results) == 2
-        assert all(r.status == "omission" for r in results)
-        # Instance paths: tags[0], tags[1] instead of tags[]
-        assert results[0].path == "tags[0]"
-        assert results[1].path == "tags[1]"
+        assert len(results) == 1
+        assert results[0].status == "skipped"
+        assert "invalid extracted type" in results[0].reason
 
     def test_gold_not_list_extracted_list(self) -> None:
-        # gold="bad", extracted=[a,b] -> 2 hallucinations per element
+        # gold="bad", extracted=[a,b] -> skipped (invalid gold type)
         schema = self._schema()
         results = score_record(schema, {"tags": "bad"}, {"tags": ["a", "b"]})
-        assert len(results) == 2
-        assert all(r.status == "hallucination" for r in results)
-        # Hallucinated elements get index -1 (no gold counterpart)
-        assert all(r.path == "tags[-1]" for r in results)
+        assert len(results) == 1
+        assert results[0].status == "skipped"
+        assert "invalid gold type" in results[0].reason
 
     def test_gold_empty_extracted_not_list(self) -> None:
-        # gold=[], extracted="bad" -> 1 mismatch for the array node
+        # gold=[], extracted="bad" -> skipped (invalid extracted type)
         schema = self._schema()
         results = score_record(schema, {"tags": []}, {"tags": "bad"})
         assert len(results) == 1
         assert results[0].path == "tags"
-        assert results[0].status == "mismatch"
-        assert results[0].score == 0.0
+        assert results[0].status == "skipped"
 
     def test_gold_not_list_extracted_empty(self) -> None:
-        # gold="bad", extracted=[] -> 1 mismatch for the array node
+        # gold="bad", extracted=[] -> skipped (invalid gold type)
         schema = self._schema()
         results = score_record(schema, {"tags": "bad"}, {"tags": []})
         assert len(results) == 1
         assert results[0].path == "tags"
-        assert results[0].status == "mismatch"
+        assert results[0].status == "skipped"
 
     def test_both_not_list(self) -> None:
-        # gold="bad", extracted="bad" -> 1 mismatch for the array node
+        # gold="bad", extracted="bad" -> skipped (invalid gold type)
         schema = self._schema()
         results = score_record(schema, {"tags": "bad"}, {"tags": "also_bad"})
         assert len(results) == 1
         assert results[0].path == "tags"
-        assert results[0].status == "mismatch"
+        assert results[0].status == "skipped"
 
     def test_gold_not_list_extracted_missing(self) -> None:
         # gold="bad", extracted missing -> 1 omission for the array node

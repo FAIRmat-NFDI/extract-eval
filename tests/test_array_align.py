@@ -424,7 +424,6 @@ class TestExplicitOrdered:
 # --- Hungarian stub (not yet implemented, falls back to ordered) ---
 
 
-@pytest.mark.skip(reason="Hungarian alignment not yet implemented -- falls back to ordered")
 class TestHungarianAlignment:
     def test_reordered_primitives_match(self) -> None:
         """Hungarian finds the optimal pairing regardless of order."""
@@ -535,6 +534,60 @@ class TestHungarianAlignment:
         assert all(r.status == "match" for r in results)
         assert len(results) == 4  # 2 elements x 2 fields
 
+
+    def test_objects_mixed_results(self) -> None:
+        """Reordered objects with a value mismatch on one element.
+
+        gold:      anneal/500, deposit/300, etch/100
+        extracted: deposit/300, anneal/500, etch/200  (etch temp wrong)
+
+        Hungarian should pair by best F1:
+          anneal <-> anneal (match)
+          deposit <-> deposit (match)
+          etch <-> etch (name match, temp mismatch)
+        """
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "temp": {"type": "number"},
+                        },
+                    },
+                    "x-eval-align": {"match_by": "hungarian"},
+                },
+            },
+        })
+        gold = {"steps": [
+            {"name": "anneal", "temp": 500},
+            {"name": "deposit", "temp": 300},
+            {"name": "etch", "temp": 100},
+        ]}
+        extracted = {"steps": [
+            {"name": "deposit", "temp": 300},
+            {"name": "anneal", "temp": 500},
+            {"name": "etch", "temp": 200},
+        ]}
+        results = score_record(schema, gold, extracted)
+
+        # 3 elements x 2 fields = 6 results
+        assert len(results) == 6
+
+        matches = [r for r in results if r.status == "match"]
+        mismatches = [r for r in results if r.status == "mismatch"]
+
+        # anneal: name match + temp match = 2 matches
+        # deposit: name match + temp match = 2 matches
+        # etch: name match + temp mismatch (100 vs 200) = 1 match + 1 mismatch
+        assert len(matches) == 5
+        assert len(mismatches) == 1
+        assert mismatches[0].gold_value == 100
+        assert mismatches[0].extracted_value == 200
+
     def test_unequal_lengths_with_best_pairing(self) -> None:
         """More extracted than gold; best pairing chosen, rest hallucinated."""
         schema = _make_schema({
@@ -575,7 +628,11 @@ class TestHungarianAlignment:
             {"tags": ["x", "y"]},
         )
         matches = [r for r in results if r.status == "match"]
+        omission = [r for r in results if r.status == "omission"]
+        hallucinations = [r for r in results if r.status == "hallucination"]
         assert len(matches) == 0
+        assert len(omission) == 2
+        assert len(hallucinations) == 2
 
     def test_end_to_end_via_evaluate(self) -> None:
         raw_schema: dict[str, object] = {
