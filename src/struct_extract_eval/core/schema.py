@@ -118,10 +118,45 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
                     "requires a 'key'",
                     path,
                 )
-            if not isinstance(raw_align["key"], str) or not raw_align["key"]:
+            key_name = raw_align["key"]
+            if not isinstance(key_name, str) or not key_name:
                 raise SchemaError(
                     "x-eval-align 'key' must be a non-empty string",
                     path,
+                )
+            # Validate key field against items schema.
+            # Errors for structurally impossible cases.
+            # Warns when matching might work on data but schema is incomplete,
+            # for example, array have object type, without items property,
+            # match_by key comparator cannot check if the key exists.
+            items_schema = schema.get("items")
+            if not isinstance(items_schema, dict):
+                raise SchemaError(
+                    "x-eval-align with match_by='key_field' requires "
+                    "'items' to be an object schema",
+                    path,
+                )
+            items_type = resolve_type(items_schema)
+            if items_type is not None and items_type != "object":
+                raise SchemaError(
+                    f"x-eval-align with match_by='key_field' requires "
+                    f"items type 'object', got '{items_type}'",
+                    path,
+                )
+            items_props = items_schema.get("properties")
+            if not isinstance(items_props, dict):
+                logger.warning(
+                    "Path '%s': x-eval-align match_by='key_field' but items "
+                    "has no 'properties'. Key-field matching will attempt to "
+                    "match on data, but no per-field scoring is possible.",
+                    path,
+                )
+            elif key_name not in items_props:
+                logger.warning(
+                    "Path '%s': x-eval-align key '%s' not found in items "
+                    "properties %s. Key-field matching will attempt to match "
+                    "on data anyway.",
+                    path, key_name, sorted(items_props),
                 )
 
     if "x-eval-compare" in schema:
@@ -149,6 +184,22 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
         except ComparatorNotFoundError as err:
             raise SchemaError(f"Unknown comparator: '{comparator_name}'", path) from err
 
+        # Warn about type-comparator mismatches for built-in comparators.
+        # Custom comparators are not checked -- the user knows their intent.
+        json_type = resolve_type(schema)
+        if comparator_name == "numeric" and json_type in ("string", "boolean"):
+            logger.warning(
+                "Path '%s': 'numeric' comparator on '%s' field. "
+                "numeric expects a number -- did you mean 'exact'?",
+                path, json_type,
+            )
+        if comparator_name == "exact" and json_type in ("number", "integer"):
+            logger.warning(
+                "Path '%s': 'exact' comparator on '%s' field. "
+                "exact requires identical type+value (e.g. 42 != 42.0). "
+                "Consider 'numeric' for tolerance-based comparison.",
+                path, json_type,
+            )
     if "x-eval-transform" in schema:
         raw = schema["x-eval-transform"]
         if not isinstance(raw, list):
