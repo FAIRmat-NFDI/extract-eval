@@ -25,18 +25,17 @@ def _coerce_to_list(value: object, path: str) -> tuple[list[object], bool]:
     value was a real list. False means the value was coerced (None or wrong
     type) and the caller should not treat results as reliable.
 
+    Does not log — callers handle the is_valid=False case themselves
+    (typically by returning a skipped FieldResult with a reason).
+
     - list: returned as-is, is_valid=True
     - None: treated as [], is_valid=False
-    - anything else: warned and treated as [], is_valid=False
+    - anything else: treated as [], is_valid=False
     """
     if isinstance(value, list):
         return value, True
     if value is None:
         return [], False
-    logger.warning(
-        "Expected list at '%s', got %s. Treating as empty list.",
-        path, type(value).__name__,
-    )
     return [], False
 
 
@@ -349,7 +348,7 @@ def _score_array_hungarian(
     if n * m > _MAX_HUNGARIAN_PAIRS:
         logger.warning(
             "Array at '%s' has %d x %d = %d pairs, exceeding "
-            "Hungarian threshold (%d). Falling back to ordered.",
+            "Hungarian threshold (%d)",
             node.path, n, m, n * m, _MAX_HUNGARIAN_PAIRS,
         )
         return _score_array_ordered(node, gold_value, extracted_value)
@@ -388,13 +387,10 @@ def _score_array_hungarian(
         for j, e in enumerate(extracted_list):
             pair_results = _score_node(items_node, g, e)
             results_matrix[i][j] = pair_results
-            # use build_record_result to get the array precision/recall/f1
-            # todo: if the array contains batch evaluator, this will be an issue see issue #58
-            # the score is 0 and status is pending for later process. use build_record_result
-            # wil not get the real result
-
+            # Limitation: batch comparator fields are "pending" here and
+            # excluded from F1, which can produce misleading scores.
+            # See issue #58 for details and planned fix.
             record = build_record_result(0, pair_results, {}, {})
-            # todo: let users config to use f1 or precision or recall as the pairwise score for Hungarian matching
             score_matrix[i][j] = record.f1
 
     # Hungarian finds optimal matching (maximize total F1)
