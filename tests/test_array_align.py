@@ -2,7 +2,7 @@
 
 Covers:
 - Key-field alignment: match by a unique identifier field
-- Hungarian alignment: stub (falls back to ordered with a warning)
+- Hungarian alignment: optimal bipartite matching by F1
 - Default behavior: no x-eval-align = ordered
 - Edge cases: empty arrays, missing key fields, duplicate keys
 """
@@ -421,11 +421,12 @@ class TestExplicitOrdered:
         )
 
 
-# --- Hungarian stub ---
+# --- Hungarian alignment ---
 
 
-class TestHungarianStub:
-    def test_hungarian_falls_back_to_ordered(self) -> None:
+class TestHungarianAlignment:
+    def test_reordered_primitives_match(self) -> None:
+        """Hungarian finds the optimal pairing regardless of order."""
         schema = _make_schema({
             "type": "object",
             "properties": {
@@ -436,11 +437,220 @@ class TestHungarianStub:
                 },
             },
         })
-        # Ordered: ["a","b"] vs ["b","a"] = 2 mismatches
         results = score_record(
             schema,
             {"tags": ["a", "b"]},
             {"tags": ["b", "a"]},
         )
         assert len(results) == 2
+        assert all(r.status == "match" for r in results)
+        # Instance paths use gold indices
+        paths = {r.path for r in results}
+        assert "tags[0]" in paths
+        assert "tags[1]" in paths
+
+    def test_ordered_would_mismatch_same_data(self) -> None:
+        """Same data with ordered matching produces mismatches."""
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+        })
+        results = score_record(
+            schema,
+            {"tags": ["a", "b"]},
+            {"tags": ["b", "a"]},
+        )
         assert all(r.status == "mismatch" for r in results)
+
+    def test_partial_overlap(self) -> None:
+        """Some elements match, some don't."""
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "x-eval-align": {"match_by": "hungarian"},
+                },
+            },
+        })
+        results = score_record(
+            schema,
+            {"tags": ["a", "b", "c"]},
+            {"tags": ["c", "d"]},
+        )
+        matches = [r for r in results if r.status == "match"]
+        omissions = [r for r in results if r.status == "omission"]
+        hallucinations = [r for r in results if r.status == "hallucination"]
+        assert len(matches) == 1      # "c" matched
+        assert len(omissions) == 2    # "a", "b" unmatched in gold
+        assert len(hallucinations) == 1  # "d" extra in extracted
+
+    def test_empty_arrays_match(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "x-eval-align": {"match_by": "hungarian"},
+                },
+            },
+        })
+        results = score_record(
+            schema, {"tags": []}, {"tags": []},
+        )
+        assert len(results) == 1
+        assert results[0].status == "match"
+
+    def test_objects_reordered(self) -> None:
+        """Hungarian matches objects by best F1, not by position."""
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "temp": {"type": "number"},
+                        },
+                    },
+                    "x-eval-align": {"match_by": "hungarian"},
+                },
+            },
+        })
+        gold = {"steps": [
+            {"name": "anneal", "temp": 500},
+            {"name": "deposit", "temp": 300},
+        ]}
+        extracted = {"steps": [
+            {"name": "deposit", "temp": 300},
+            {"name": "anneal", "temp": 500},
+        ]}
+        results = score_record(schema, gold, extracted)
+        assert all(r.status == "match" for r in results)
+        assert len(results) == 4  # 2 elements x 2 fields
+
+
+    def test_objects_mixed_results(self) -> None:
+        """Reordered objects with a value mismatch on one element.
+
+        gold:      anneal/500, deposit/300, etch/100
+        extracted: deposit/300, anneal/500, etch/200  (etch temp wrong)
+
+        Hungarian should pair by best F1:
+          anneal <-> anneal (match)
+          deposit <-> deposit (match)
+          etch <-> etch (name match, temp mismatch)
+        """
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "temp": {"type": "number"},
+                        },
+                    },
+                    "x-eval-align": {"match_by": "hungarian"},
+                },
+            },
+        })
+        gold = {"steps": [
+            {"name": "anneal", "temp": 500},
+            {"name": "deposit", "temp": 300},
+            {"name": "etch", "temp": 100},
+        ]}
+        extracted = {"steps": [
+            {"name": "deposit", "temp": 300},
+            {"name": "anneal", "temp": 500},
+            {"name": "etch", "temp": 200},
+        ]}
+        results = score_record(schema, gold, extracted)
+
+        # 3 elements x 2 fields = 6 results
+        assert len(results) == 6
+
+        matches = [r for r in results if r.status == "match"]
+        mismatches = [r for r in results if r.status == "mismatch"]
+
+        # anneal: name match + temp match = 2 matches
+        # deposit: name match + temp match = 2 matches
+        # etch: name match + temp mismatch (100 vs 200) = 1 match + 1 mismatch
+        assert len(matches) == 5
+        assert len(mismatches) == 1
+        assert mismatches[0].gold_value == 100
+        assert mismatches[0].extracted_value == 200
+
+    def test_unequal_lengths_with_best_pairing(self) -> None:
+        """More extracted than gold; best pairing chosen, rest hallucinated."""
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "x-eval-align": {"match_by": "hungarian"},
+                },
+            },
+        })
+        results = score_record(
+            schema,
+            {"tags": ["x"]},
+            {"tags": ["a", "x", "b"]},
+        )
+        matches = [r for r in results if r.status == "match"]
+        hallucinations = [r for r in results if r.status == "hallucination"]
+        assert len(matches) == 1      # "x" matched
+        assert len(hallucinations) == 2  # "a", "b"
+
+    def test_no_matches_all_omissions_and_hallucinations(self) -> None:
+        """No overlap at all."""
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "x-eval-align": {"match_by": "hungarian"},
+                },
+            },
+        })
+        results = score_record(
+            schema,
+            {"tags": ["a", "b"]},
+            {"tags": ["x", "y"]},
+        )
+        matches = [r for r in results if r.status == "match"]
+        omission = [r for r in results if r.status == "omission"]
+        hallucinations = [r for r in results if r.status == "hallucination"]
+        assert len(matches) == 0
+        assert len(omission) == 2
+        assert len(hallucinations) == 2
+
+    def test_end_to_end_via_evaluate(self) -> None:
+        raw_schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "x-eval-align": {"match_by": "hungarian"},
+                },
+            },
+        }
+        annotate_xeval(raw_schema)
+        gold = [{"tags": ["a", "b", "c"]}]
+        extracted = [{"tags": ["c", "a", "b"]}]
+        result = evaluate(gold, extracted, raw_schema)
+        assert result.mean_f1 == 1.0
