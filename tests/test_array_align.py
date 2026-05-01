@@ -421,7 +421,7 @@ class TestExplicitOrdered:
         )
 
 
-# --- Hungarian stub (not yet implemented, falls back to ordered) ---
+# --- Hungarian alignment ---
 
 
 class TestHungarianAlignment:
@@ -444,6 +444,10 @@ class TestHungarianAlignment:
         )
         assert len(results) == 2
         assert all(r.status == "match" for r in results)
+        # Instance paths use gold indices
+        paths = {r.path for r in results}
+        assert "tags[0]" in paths
+        assert "tags[1]" in paths
 
     def test_ordered_would_mismatch_same_data(self) -> None:
         """Same data with ordered matching produces mismatches."""

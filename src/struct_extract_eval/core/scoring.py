@@ -352,18 +352,20 @@ def _score_array_hungarian(
             "Hungarian threshold (%d). Falling back to ordered.",
             node.path, n, m, n * m, _MAX_HUNGARIAN_PAIRS,
         )
-        # return _score_array_ordered(node, gold_value, extracted_value)
+        return _score_array_ordered(node, gold_value, extracted_value)
 
     # One side empty: no matching needed, just omissions/hallucinations
     if n == 0:
-        for elem in extracted_list:
-            results.extend(
-                _hallucination_results(items_node, elem)
-            )
+        for idx, elem in enumerate(extracted_list):
+            element_results = _hallucination_results(items_node, elem)
+            _rewrite_element_paths(element_results, items_node.path, -1)
+            results.extend(element_results)
         return results
     if m == 0:
-        for elem in gold_list:
-            results.extend(_omission_results(items_node, elem))
+        for idx, elem in enumerate(gold_list):
+            element_results = _omission_results(items_node, elem)
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
         return results
 
     # score ALL n*m pairs, build cost matrix and results cache
@@ -387,6 +389,10 @@ def _score_array_hungarian(
             pair_results = _score_node(items_node, g, e)
             results_matrix[i][j] = pair_results
             # use build_record_result to get the array precision/recall/f1
+            # todo: if the array contains batch evaluator, this will be an issue see issue #58
+            # the score is 0 and status is pending for later process. use build_record_result
+            # wil not get the real result
+
             record = build_record_result(0, pair_results, {}, {})
             # todo: let users config to use f1 or precision or recall as the pairwise score for Hungarian matching
             score_matrix[i][j] = record.f1
@@ -403,20 +409,24 @@ def _score_array_hungarian(
         if score_matrix[i][j] > 0:
             matched_gold.add(i)
             matched_ext.add(j)
-            results.extend(results_matrix[i][j])
+            element_results = results_matrix[i][j]
+            _rewrite_element_paths(element_results, items_node.path, i)
+            results.extend(element_results)
         # else: leave both unmatched
 
     # Unmatched gold -> omissions
     for i in range(n):
         if i not in matched_gold:
-            results.extend(_omission_results(items_node, gold_list[i]))
+            element_results = _omission_results(items_node, gold_list[i])
+            _rewrite_element_paths(element_results, items_node.path, i)
+            results.extend(element_results)
 
     # Unmatched extracted -> hallucinations
     for j in range(m):
         if j not in matched_ext:
-            results.extend(
-                _hallucination_results(items_node, extracted_list[j])
-            )
+            element_results = _hallucination_results(items_node, extracted_list[j])
+            _rewrite_element_paths(element_results, items_node.path, -1)
+            results.extend(element_results)
 
     return results
 
