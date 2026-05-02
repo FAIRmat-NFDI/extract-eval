@@ -21,6 +21,7 @@ by default. Register them yourself before calling evaluate():
 
 from copy import deepcopy
 
+from struct_extract_eval.core.null_handling import NullHandling
 from struct_extract_eval.core.record import (
     RunResult,
     build_record_result,
@@ -33,21 +34,23 @@ from struct_extract_eval.core.scoring import score_record
 def _run_evaluation(
     pairs: list[tuple[str | int, dict[str, object], dict[str, object]]],
     tree: SchemaNode,
+    null_handling: NullHandling | None = None,
 ) -> RunResult:
     """Score all pairs against a parsed schema tree.
 
     Any field with ``pending_batch`` set is resolved via ``process_batches``
     after per-record scoring. The dispatch happens record-by-record so each
-    record's batch handlers see only that record's pending fields (matches the
-    "one judge call per record" design).
+    record's batch handlers see only that record's pending fields.
     """
-    # Imported lazily so the core has no hard dependency on the batch layer.
     from struct_extract_eval.batch.process import process_batches
+    from struct_extract_eval.core.null_handling import reclassify_nulls
 
     records = []
     for record_id, g, e in pairs:
         field_results = score_record(tree, g, e)
         process_batches(field_results, tree)
+        if null_handling is not None:
+            reclassify_nulls(field_results, null_handling)
         records.append(build_record_result(record_id, field_results, g, e))
     return build_run_result(records)
 
@@ -57,6 +60,7 @@ def evaluate(
     extracted: list[dict[str, object]],
     schema: dict[str, object],
     id_field: str | None = None,
+    null_handling: NullHandling | None = None,
 ) -> RunResult:
     """Evaluate extracted records against gold using field-level comparison.
 
@@ -65,18 +69,18 @@ def evaluate(
     and edit it, then pass it here.
 
     If your schema references a batch comparator (e.g. ``"semantic"`` or any
-    custom name), register it BEFORE calling evaluate. The library does not
-    auto-register any batch comparators -- you choose which ones to enable
-    and under which name(s).
+    custom name), register it BEFORE calling evaluate.
 
     Args:
         gold: Gold (ground truth) instances.
-        extracted: Extracted (LLM output) instances. Must be same length as gold.
+        extracted: Extracted (LLM output) instances. Must be same length
+            as gold.
         schema: Eval schema (resolved schema with x-eval-* annotations).
-            Use ``infer_schema()`` + ``annotate_xeval()`` and review
-            before passing.
         id_field: Field name to use as record ID (read from gold).
             Defaults to integer index.
+        null_handling: Optional. Pass a ``NullHandling`` instance to
+            enable Approach C scoring (null/empty values treated as
+            absent). When None (default), null is a normal value.
 
     Returns:
         RunResult with per-record and per-field metrics.
@@ -97,4 +101,4 @@ def evaluate(
         (g[id_field] if id_field else i, g, e)
         for i, (g, e) in enumerate(zip(gold, extracted, strict=True))
     ]
-    return _run_evaluation(pairs, tree)
+    return _run_evaluation(pairs, tree, null_handling=null_handling)
