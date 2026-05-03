@@ -12,6 +12,7 @@ class TestReclassifyNulls:
             FieldResult(
                 path="a", score=0.0, comparator="exact",
                 gold_value=None, extracted_value="hello", status="mismatch",
+                gold_compared=None, extracted_compared="hello",
             ),
         ]
         reclassify_nulls(results, NullHandling())
@@ -23,6 +24,7 @@ class TestReclassifyNulls:
             FieldResult(
                 path="a", score=0.0, comparator="exact",
                 gold_value="hello", extracted_value=None, status="mismatch",
+                gold_compared="hello", extracted_compared=None,
             ),
         ]
         reclassify_nulls(results, NullHandling())
@@ -34,6 +36,7 @@ class TestReclassifyNulls:
             FieldResult(
                 path="a", score=1.0, comparator="exact",
                 gold_value=None, extracted_value=None, status="match",
+                gold_compared=None, extracted_compared=None,
             ),
         ]
         reclassify_nulls(results, NullHandling(both_absent_skip=True))
@@ -45,10 +48,12 @@ class TestReclassifyNulls:
             FieldResult(
                 path="a", score=1.0, comparator="exact",
                 gold_value=None, extracted_value=None, status="match",
+                gold_compared=None, extracted_compared=None,
             ),
         ]
         reclassify_nulls(results, NullHandling(both_absent_skip=False))
-        assert results[0].status == "match"  # unchanged
+        assert results[0].status == "match"
+        assert results[0].score == 1.0
 
     def test_empty_string_as_absent(self) -> None:
         config = NullHandling(absent_values=[None, ""], both_absent_skip=True)
@@ -56,14 +61,17 @@ class TestReclassifyNulls:
             FieldResult(
                 path="a", score=0.0, comparator="exact",
                 gold_value="PVD", extracted_value="", status="mismatch",
+                gold_compared="PVD", extracted_compared="",
             ),
             FieldResult(
                 path="b", score=0.0, comparator="exact",
                 gold_value="", extracted_value="hello", status="mismatch",
+                gold_compared="", extracted_compared="hello",
             ),
             FieldResult(
                 path="c", score=1.0, comparator="exact",
                 gold_value="", extracted_value="", status="match",
+                gold_compared="", extracted_compared="",
             ),
         ]
         reclassify_nulls(results, config)
@@ -77,10 +85,12 @@ class TestReclassifyNulls:
             FieldResult(
                 path="a", score=1.0, comparator="exact",
                 gold_value=None, extracted_value=None, status="match",
+                gold_compared=None, extracted_compared=None,
             ),
             FieldResult(
                 path="b", score=0.0, comparator="exact",
                 gold_value=None, extracted_value="", status="mismatch",
+                gold_compared=None, extracted_compared="",
             ),
         ]
         reclassify_nulls(results, config)
@@ -92,10 +102,12 @@ class TestReclassifyNulls:
             FieldResult(
                 path="a", score=1.0, comparator="exact",
                 gold_value="PVD", extracted_value="PVD", status="match",
+                gold_compared="PVD", extracted_compared="PVD",
             ),
             FieldResult(
                 path="b", score=0.0, comparator="exact",
                 gold_value="PVD", extracted_value="CVD", status="mismatch",
+                gold_compared="PVD", extracted_compared="CVD",
             ),
         ]
         reclassify_nulls(results, NullHandling())
@@ -119,6 +131,7 @@ class TestReclassifyNulls:
             FieldResult(
                 path="a", score=0.0, comparator="exact",
                 gold_value=False, extracted_value="hello", status="mismatch",
+                gold_compared=False, extracted_compared="hello",
             ),
         ]
         reclassify_nulls(results, config)
@@ -131,7 +144,7 @@ class TestReclassifyNulls:
             FieldResult(
                 path="a", score=0.0, comparator="exact",
                 gold_value="  ", extracted_value="hello", status="mismatch",
-                gold_compared="", extracted_compared="hello",  # strip transform made it ""
+                gold_compared="", extracted_compared="hello",  # strip made it ""
             ),
         ]
         reclassify_nulls(results, config)
@@ -249,3 +262,54 @@ class TestEvaluateWithNullHandling:
             post_process=lambda frs: reclassify_nulls(frs, config),
         )
         assert result.records[0].field_results[0].status == "omission"
+
+    def test_nested_object_null_extracted(self) -> None:
+        """Null extracted for an object field -> child leaves are omissions."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "object",
+                    "properties": {
+                        "street": {"type": "string"},
+                        "city": {"type": "string"},
+                    },
+                },
+            },
+        }
+        annotate_xeval(schema)
+
+        config = NullHandling(absent_values=[None])
+        result = evaluate(
+            [{"address": {"street": "Main St", "city": "NYC"}}],
+            [{"address": None}],
+            schema,
+            post_process=lambda frs: reclassify_nulls(frs, config),
+        )
+        by_path = {r.path: r for r in result.records[0].field_results}
+        assert by_path["address.street"].status == "omission"
+        assert by_path["address.city"].status == "omission"
+
+    def test_transform_normalizes_to_absent(self) -> None:
+        """Transform that strips whitespace, making value absent ('')."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "notes": {
+                    "type": "string",
+                    "x-eval-transform": ["strip"],
+                },
+            },
+        }
+        annotate_xeval(schema)
+
+        config = NullHandling(absent_values=[None, ""])
+        result = evaluate(
+            [{"notes": "real note"}],
+            [{"notes": "   "}],  # strip -> "" -> absent
+            schema,
+            post_process=lambda frs: reclassify_nulls(frs, config),
+        )
+        fr = result.records[0].field_results[0]
+        assert fr.status == "omission"
+        assert fr.extracted_compared == ""

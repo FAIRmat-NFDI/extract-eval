@@ -84,7 +84,13 @@ def reclassify_nulls(
     - Gold absent, extracted has value -> status="hallucination"
     - Gold has value, extracted absent -> status="omission"
 
-    Note: this runs AFTER process_batches. Fields that go through batch
+    Note: this operates on leaf-level FieldResults only. Container fields
+    (objects, arrays) are decomposed into leaf FieldResults by the scorer
+    before post-processing runs. If the extractor outputs null for an
+    object field, each child property appears as a leaf with
+    extracted_compared=None, which this function reclassifies correctly.
+
+    This runs AFTER process_batches. Fields that go through batch
     comparators (e.g., semantic) are scored first, then reclassified here.
     This means batch comparators may be called on absent values
     unnecessarily. Fields that error in the batch phase (batch_error) are
@@ -101,12 +107,9 @@ def reclassify_nulls(
         if fr.status in ("skipped", "batch_error", "omission", "hallucination"):
             continue
 
-        # Use post-transform values. For scored fields (match/mismatch/pending),
-        # gold_compared/extracted_compared are always set (same as raw values
-        # when no transforms). This respects transforms like strip that may
-        # normalize whitespace-only strings to "".
-        g_val = fr.gold_compared if fr.gold_compared is not None else fr.gold_value
-        e_val = fr.extracted_compared if fr.extracted_compared is not None else fr.extracted_value
+        # Use post-transform values (always set by _score_leaf for scored fields).
+        g_val = fr.gold_compared
+        e_val = fr.extracted_compared
         g_absent = _is_absent(g_val, config.absent_values)
         e_absent = _is_absent(e_val, config.absent_values)
 
