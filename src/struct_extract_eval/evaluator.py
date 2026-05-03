@@ -19,38 +19,40 @@ by default. Register them yourself before calling evaluate():
     result = evaluate(gold, extracted, eval_schema)
 """
 
+from collections.abc import Callable
 from copy import deepcopy
 
-from struct_extract_eval.core.null_handling import NullHandling
 from struct_extract_eval.core.record import (
     RunResult,
     build_record_result,
     build_run_result,
 )
 from struct_extract_eval.core.schema import SchemaNode, parse_eval_schema
-from struct_extract_eval.core.scoring import score_record
+from struct_extract_eval.core.scoring import FieldResult, score_record
+
+# Type alias for post-processing hooks
+PostProcess = Callable[[list[FieldResult]], list[FieldResult]]
 
 
 def _run_evaluation(
     pairs: list[tuple[str | int, dict[str, object], dict[str, object]]],
     tree: SchemaNode,
-    null_handling: NullHandling | None = None,
+    post_process: PostProcess | None = None,
 ) -> RunResult:
     """Score all pairs against a parsed schema tree.
 
     Any field with ``pending_batch`` set is resolved via ``process_batches``
-    after per-record scoring. The dispatch happens record-by-record so each
-    record's batch handlers see only that record's pending fields.
+    after per-record scoring. ``post_process`` (if provided) runs last,
+    after batch dispatch.
     """
     from struct_extract_eval.batch.process import process_batches
-    from struct_extract_eval.core.null_handling import reclassify_nulls
 
     records = []
     for record_id, g, e in pairs:
         field_results = score_record(tree, g, e)
         process_batches(field_results, tree)
-        if null_handling is not None:
-            reclassify_nulls(field_results, null_handling)
+        if post_process is not None:
+            field_results = post_process(field_results)
         records.append(build_record_result(record_id, field_results, g, e))
     return build_run_result(records)
 
@@ -60,7 +62,7 @@ def evaluate(
     extracted: list[dict[str, object]],
     schema: dict[str, object],
     id_field: str | None = None,
-    null_handling: NullHandling | None = None,
+    post_process: PostProcess | None = None,
 ) -> RunResult:
     """Evaluate extracted records against gold using field-level comparison.
 
@@ -78,9 +80,26 @@ def evaluate(
         schema: Eval schema (resolved schema with x-eval-* annotations).
         id_field: Field name to use as record ID (read from gold).
             Defaults to integer index.
-        null_handling: Optional. Pass a ``NullHandling`` instance to
-            enable Approach C scoring (null/empty values treated as
-            absent). When None (default), null is a normal value.
+        post_process: Optional callable that post-processes field results
+            after scoring and batch dispatch. Takes a list of FieldResult,
+            returns a (possibly modified) list of FieldResult. Runs once
+            per record, before metrics are computed.
+
+            Built-in post-processors:
+            - ``reclassify_nulls(config)`` -- treat null/empty as absent
+
+            Example::
+
+                from struct_extract_eval.postprocess import (
+                    NullHandling, reclassify_nulls,
+                )
+
+                result = evaluate(
+                    gold, extracted, schema,
+                    post_process=lambda frs: reclassify_nulls(
+                        frs, NullHandling(absent_values=[None, ""])
+                    ),
+                )
 
     Returns:
         RunResult with per-record and per-field metrics.
@@ -101,4 +120,4 @@ def evaluate(
         (g[id_field] if id_field else i, g, e)
         for i, (g, e) in enumerate(zip(gold, extracted, strict=True))
     ]
-    return _run_evaluation(pairs, tree, null_handling=null_handling)
+    return _run_evaluation(pairs, tree, post_process=post_process)

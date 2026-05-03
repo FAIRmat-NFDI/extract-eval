@@ -1,6 +1,6 @@
 """Tests for null handling (Approach C): reclassify absent values."""
 
-from struct_extract_eval.core.null_handling import NullHandling, reclassify_nulls
+from struct_extract_eval.postprocess import NullHandling, reclassify_nulls
 from struct_extract_eval.core.scoring import FieldResult
 from struct_extract_eval.core.xeval import annotate_xeval
 from struct_extract_eval.evaluator import evaluate
@@ -9,28 +9,43 @@ from struct_extract_eval.evaluator import evaluate
 class TestReclassifyNulls:
     def test_gold_null_extracted_value_becomes_hallucination(self) -> None:
         results = [
-            FieldResult("a", 0.0, "exact", None, "hello", "mismatch"),
+            FieldResult(
+                path="a", score=0.0, comparator="exact",
+                gold_value=None, extracted_value="hello", status="mismatch",
+            ),
         ]
         reclassify_nulls(results, NullHandling())
         assert results[0].status == "hallucination"
+        assert results[0].reason == "gold is absent"
 
     def test_gold_value_extracted_null_becomes_omission(self) -> None:
         results = [
-            FieldResult("a", 0.0, "exact", "hello", None, "mismatch"),
+            FieldResult(
+                path="a", score=0.0, comparator="exact",
+                gold_value="hello", extracted_value=None, status="mismatch",
+            ),
         ]
         reclassify_nulls(results, NullHandling())
         assert results[0].status == "omission"
+        assert results[0].reason == "extracted is absent"
 
     def test_both_null_skip(self) -> None:
         results = [
-            FieldResult("a", 1.0, "exact", None, None, "match"),
+            FieldResult(
+                path="a", score=1.0, comparator="exact",
+                gold_value=None, extracted_value=None, status="match",
+            ),
         ]
         reclassify_nulls(results, NullHandling(both_absent_skip=True))
         assert results[0].status == "skipped"
+        assert results[0].reason == "both absent"
 
     def test_both_null_match(self) -> None:
         results = [
-            FieldResult("a", 1.0, "exact", None, None, "match"),
+            FieldResult(
+                path="a", score=1.0, comparator="exact",
+                gold_value=None, extracted_value=None, status="match",
+            ),
         ]
         reclassify_nulls(results, NullHandling(both_absent_skip=False))
         assert results[0].status == "match"  # unchanged
@@ -38,9 +53,18 @@ class TestReclassifyNulls:
     def test_empty_string_as_absent(self) -> None:
         config = NullHandling(absent_values=[None, ""], both_absent_skip=True)
         results = [
-            FieldResult("a", 0.0, "exact", "PVD", "", "mismatch"),
-            FieldResult("b", 0.0, "exact", "", "hello", "mismatch"),
-            FieldResult("c", 1.0, "exact", "", "", "match"),
+            FieldResult(
+                path="a", score=0.0, comparator="exact",
+                gold_value="PVD", extracted_value="", status="mismatch",
+            ),
+            FieldResult(
+                path="b", score=0.0, comparator="exact",
+                gold_value="", extracted_value="hello", status="mismatch",
+            ),
+            FieldResult(
+                path="c", score=1.0, comparator="exact",
+                gold_value="", extracted_value="", status="match",
+            ),
         ]
         reclassify_nulls(results, config)
         assert results[0].status == "omission"
@@ -50,8 +74,14 @@ class TestReclassifyNulls:
     def test_mixed_absent_values(self) -> None:
         config = NullHandling(absent_values=[None, ""], both_absent_skip=True)
         results = [
-            FieldResult("a", 1.0, "exact", None, None, "match"),
-            FieldResult("b", 0.0, "exact", None, "", "mismatch"),
+            FieldResult(
+                path="a", score=1.0, comparator="exact",
+                gold_value=None, extracted_value=None, status="match",
+            ),
+            FieldResult(
+                path="b", score=0.0, comparator="exact",
+                gold_value=None, extracted_value="", status="mismatch",
+            ),
         ]
         reclassify_nulls(results, config)
         assert results[0].status == "skipped"  # null vs null
@@ -59,8 +89,14 @@ class TestReclassifyNulls:
 
     def test_normal_values_unchanged(self) -> None:
         results = [
-            FieldResult("a", 1.0, "exact", "PVD", "PVD", "match"),
-            FieldResult("b", 0.0, "exact", "PVD", "CVD", "mismatch"),
+            FieldResult(
+                path="a", score=1.0, comparator="exact",
+                gold_value="PVD", extracted_value="PVD", status="match",
+            ),
+            FieldResult(
+                path="b", score=0.0, comparator="exact",
+                gold_value="PVD", extracted_value="CVD", status="mismatch",
+            ),
         ]
         reclassify_nulls(results, NullHandling())
         assert results[0].status == "match"
@@ -68,10 +104,39 @@ class TestReclassifyNulls:
 
     def test_skipped_fields_not_touched(self) -> None:
         results = [
-            FieldResult("a", 0.0, "", None, "hello", "skipped"),
+            FieldResult(
+                path="a", score=0.0, comparator="",
+                gold_value=None, extracted_value="hello", status="skipped",
+            ),
         ]
         reclassify_nulls(results, NullHandling())
         assert results[0].status == "skipped"
+
+    def test_bool_not_confused_with_int(self) -> None:
+        """absent_values=[0] should NOT match False (bool != int)."""
+        config = NullHandling(absent_values=[0])
+        results = [
+            FieldResult(
+                path="a", score=0.0, comparator="exact",
+                gold_value=False, extracted_value="hello", status="mismatch",
+            ),
+        ]
+        reclassify_nulls(results, config)
+        assert results[0].status == "mismatch"  # NOT hallucination
+
+    def test_uses_compared_values_when_available(self) -> None:
+        """Reclassification should use post-transform values."""
+        config = NullHandling(absent_values=[None, ""])
+        results = [
+            FieldResult(
+                path="a", score=0.0, comparator="exact",
+                gold_value="  ", extracted_value="hello", status="mismatch",
+                gold_compared="", extracted_compared="hello",  # strip transform made it ""
+            ),
+        ]
+        reclassify_nulls(results, config)
+        # gold_compared="" is absent -> hallucination
+        assert results[0].status == "hallucination"
 
 
 class TestEvaluateWithNullHandling:
@@ -89,11 +154,10 @@ class TestEvaluateWithNullHandling:
         gold = [{"method": "PVD", "temp": 300, "notes": None}]
         extracted = [{"method": "PVD", "temp": None, "notes": None}]
 
+        config = NullHandling(absent_values=[None], both_absent_skip=True)
         result = evaluate(
             gold, extracted, schema,
-            null_handling=NullHandling(
-                absent_values=[None], both_absent_skip=True
-            ),
+            post_process=lambda frs: reclassify_nulls(frs, config),
         )
 
         by_path = {
@@ -137,11 +201,12 @@ class TestEvaluateWithNullHandling:
         }
         annotate_xeval(schema)
 
+        config = NullHandling(both_absent_skip=False)
         result = evaluate(
             [{"notes": None}],
             [{"notes": None}],
             schema,
-            null_handling=NullHandling(both_absent_skip=False),
+            post_process=lambda frs: reclassify_nulls(frs, config),
         )
         assert result.records[0].field_results[0].status == "match"
 
@@ -155,10 +220,11 @@ class TestEvaluateWithNullHandling:
         }
         annotate_xeval(schema)
 
+        config = NullHandling(absent_values=[None, ""])
         result = evaluate(
             [{"method": "PVD"}],
             [{"method": ""}],
             schema,
-            null_handling=NullHandling(absent_values=[None, ""]),
+            post_process=lambda frs: reclassify_nulls(frs, config),
         )
         assert result.records[0].field_results[0].status == "omission"

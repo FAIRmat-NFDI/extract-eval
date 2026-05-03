@@ -3,17 +3,19 @@
 When using constrained-output tools (Outlines, Instructor, etc.), the LLM
 always produces all schema fields. It signals "I don't know" by outputting
 ``null`` (or ``""``, ``[]``), not by omitting the key. Under the default
-scoring (Approach A), these are mismatches. This module provides Approach C:
-reclassify null/empty values as absent, restoring omission/hallucination
-differentiation.
+scoring (Approach A), these are mismatches. This module provides
+``reclassify_nulls`` as a post-processor: reclassify null/empty values as
+absent, restoring omission/hallucination differentiation.
 
 Usage::
 
-    from struct_extract_eval import evaluate, NullHandling
+    from struct_extract_eval import evaluate
+    from struct_extract_eval.postprocess import NullHandling, reclassify_nulls
 
+    config = NullHandling(absent_values=[None, ""], both_absent_skip=True)
     result = evaluate(
         gold, extracted, schema,
-        null_handling=NullHandling(absent_values=[None, ""], both_absent_skip=True),
+        post_process=lambda frs: reclassify_nulls(frs, config),
     )
 """
 
@@ -26,8 +28,8 @@ from struct_extract_eval.core.scoring import FieldResult
 class NullHandling:
     """Configuration for null/absent-value reclassification.
 
-    Pass an instance to ``evaluate(null_handling=...)`` to enable.
-    If not passed, null is treated as a normal value (default behavior).
+    Pass to ``reclassify_nulls(field_results, config)`` as a post-processor.
+    If not used, null is treated as a normal value (default behavior).
 
     Args:
         absent_values: Values that mean "absent" / "I don't know."
@@ -43,9 +45,16 @@ class NullHandling:
 
 
 def _is_absent(value: object, absent_values: list[object]) -> bool:
-    """Check if a value is in the absent-values set."""
+    """Check if a value is in the absent-values set.
+
+    Uses identity (``is``) first, then equality (``==``) with a type
+    guard: ``bool == int`` in Python (True==1, False==0), so we require
+    matching types to avoid false positives.
+    """
     for av in absent_values:
-        if value is av or value == av:
+        if value is av:
+            return True
+        if type(value) is type(av) and value == av:
             return True
     return False
 
@@ -64,6 +73,12 @@ def reclassify_nulls(
     - Gold absent, extracted has value -> status="hallucination"
     - Gold has value, extracted absent -> status="omission"
 
+    Note: this runs AFTER process_batches. Fields that go through batch
+    comparators (e.g., semantic) are scored first, then reclassified here.
+    This means batch comparators may be called on absent values
+    unnecessarily. Fields that error in the batch phase (batch_error) are
+    skipped by this function and left as-is.
+
     Args:
         field_results: Results to reclassify (mutated in place).
         config: NullHandling configuration.
@@ -75,20 +90,28 @@ def reclassify_nulls(
         if fr.status in ("skipped", "batch_error"):
             continue
 
-        g_absent = _is_absent(fr.gold_value, config.absent_values)
-        e_absent = _is_absent(fr.extracted_value, config.absent_values)
+        # Use post-transform values (gold_compared/extracted_compared) if
+        # available, so transforms like strip/normalize_whitespace are respected.
+        # Fall back to raw values when compared values are None (no transforms).
+        g_val = fr.gold_compared if fr.gold_compared is not None else fr.gold_value
+        e_val = fr.extracted_compared if fr.extracted_compared is not None else fr.extracted_value
+        g_absent = _is_absent(g_val, config.absent_values)
+        e_absent = _is_absent(e_val, config.absent_values)
 
         if g_absent and e_absent:
             if config.both_absent_skip:
                 fr.status = "skipped"
                 fr.score = 0.0
+                fr.reason = "both absent"
 
         elif g_absent and not e_absent:
             fr.status = "hallucination"
             fr.score = 0.0
+            fr.reason = "gold is absent"
 
         elif not g_absent and e_absent:
             fr.status = "omission"
             fr.score = 0.0
+            fr.reason = "extracted is absent"
 
     return field_results
