@@ -20,6 +20,7 @@ from struct_extract_eval.core.xeval import (
     reset_type_defaults,
     set_type_default,
 )
+from struct_extract_eval.postprocess import NullHandling, reclassify_nulls
 from struct_extract_eval.evaluator import evaluate
 
 __all__ = [
@@ -34,6 +35,8 @@ __all__ = [
     "TransformSpec",
     "annotate_xeval",
     "evaluate",
+    "NullHandling",
+    "reclassify_nulls",
     "reset_type_defaults",
     "set_type_default",
     "infer_schema",
