@@ -210,6 +210,27 @@ class TestEvaluateWithNullHandling:
         )
         assert result.records[0].field_results[0].status == "match"
 
+    def test_both_absent_skip_false_mixed_markers(self) -> None:
+        """both_absent_skip=False with None vs '' -> match (both absent, equivalent)."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "notes": {"type": "string"},
+            },
+        }
+        annotate_xeval(schema)
+
+        config = NullHandling(absent_values=[None, ""], both_absent_skip=False)
+        result = evaluate(
+            [{"notes": None}],
+            [{"notes": ""}],
+            schema,
+            post_process=lambda frs: reclassify_nulls(frs, config),
+        )
+        fr = result.records[0].field_results[0]
+        assert fr.status == "match"
+        assert fr.score == 1.0
+
     def test_empty_string_absent(self) -> None:
         """Empty string treated as absent when configured."""
         schema: dict[str, object] = {

@@ -33,9 +33,20 @@ class NullHandling:
 
     Args:
         absent_values: Values that mean "absent" / "I don't know."
-            Default: ``[None]``. Common override: ``[None, ""]``.
+            All values in this list are treated as **equivalent** absent
+            markers. For example, ``[None, ""]`` means both ``None`` and
+            ``""`` represent the same concept: "no answer." A gold with
+            ``None`` and an extracted with ``""`` are both absent -- the
+            ``both_absent_skip`` rule applies (not a mismatch).
+
+            If you consider ``None`` and ``""`` to be semantically different
+            (e.g., ``None`` = "not applicable" vs ``""`` = "unknown"), only
+            list the one you want to treat as absent.
+
+            Default: ``[None]``.
         both_absent_skip: When both gold and extracted have an absent
-            value. True (default) = skip (excluded from metrics).
+            value (any value from ``absent_values``).
+            True (default) = skip (excluded from metrics).
             False = count as match (extractor correctly identified
             "no value").
     """
@@ -87,12 +98,13 @@ def reclassify_nulls(
         The same list (mutated in place), for chaining.
     """
     for fr in field_results:
-        if fr.status in ("skipped", "batch_error"):
+        if fr.status in ("skipped", "batch_error", "omission", "hallucination"):
             continue
 
-        # Use post-transform values (gold_compared/extracted_compared) if
-        # available, so transforms like strip/normalize_whitespace are respected.
-        # Fall back to raw values when compared values are None (no transforms).
+        # Use post-transform values. For scored fields (match/mismatch/pending),
+        # gold_compared/extracted_compared are always set (same as raw values
+        # when no transforms). This respects transforms like strip that may
+        # normalize whitespace-only strings to "".
         g_val = fr.gold_compared if fr.gold_compared is not None else fr.gold_value
         e_val = fr.extracted_compared if fr.extracted_compared is not None else fr.extracted_value
         g_absent = _is_absent(g_val, config.absent_values)
@@ -103,6 +115,11 @@ def reclassify_nulls(
                 fr.status = "skipped"
                 fr.score = 0.0
                 fr.reason = "both absent"
+            else:
+                # Count as match: both sides are absent (equivalent markers)
+                fr.status = "match"
+                fr.score = 1.0
+                fr.reason = "both absent (counted as match)"
 
         elif g_absent and not e_absent:
             fr.status = "hallucination"

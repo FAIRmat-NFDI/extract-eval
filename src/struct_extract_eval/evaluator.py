@@ -85,8 +85,8 @@ def evaluate(
             returns a (possibly modified) list of FieldResult. Runs once
             per record, before metrics are computed.
 
-            Built-in post-processors:
-            - ``reclassify_nulls(config)`` -- treat null/empty as absent
+            Built-in post-processors (wrap with lambda to match signature):
+            - ``reclassify_nulls(frs, config)`` -- treat null/empty as absent
 
             Example::
 
