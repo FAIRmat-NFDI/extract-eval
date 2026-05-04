@@ -72,6 +72,8 @@ def propagate_batch_errors(
     # Leave omission/hallucination untouched -- those are structural
     # issues that exist regardless of whether the batch comparator worked.
     for fr in field_results:
+        # "omission", "hallucination" are labeled before sending to batch processor
+        # due to one field missing
         if fr.comparator in tainted and fr.status not in ("omission", "hallucination"):
             fr.status = "batch_error"
             fr.score = 0.0
