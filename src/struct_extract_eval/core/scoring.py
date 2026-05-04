@@ -8,6 +8,7 @@ by a unique identifier field. Hungarian bipartite matching is planned.
 
 import logging
 
+from struct_extract_eval.batch.process import process_batches
 from struct_extract_eval.core.comparators.registry import get_comparator, is_batch
 from struct_extract_eval.core.field_result import FieldResult, FieldStatus
 from struct_extract_eval.core.schema import SchemaNode
@@ -346,14 +347,36 @@ def _score_array_hungarian(
         [[] for _ in range(m)] for _ in range(n)
     ]
 
+    has_pending = False
     for i, g in enumerate(gold_list):
         for j, e in enumerate(extracted_list):
             pair_results = _score_node(items_node, g, e)
             results_matrix[i][j] = pair_results
-            # Limitation: batch comparator fields are "pending" here and
-            # excluded from F1, which can produce misleading scores.
-            # See issue #58 for details and planned fix.
-            record = build_record_result(0, pair_results, {}, {})
+            if not has_pending and any(r.status == "pending" for r in pair_results):
+                has_pending = True
+
+    # Resolve batch comparators before computing the cost matrix.
+    # This makes n*m batch calls -- the user opted into this by combining
+    # batch comparators with Hungarian matching.
+    if has_pending:
+        logger.warning(
+            "Array at '%s' uses Hungarian matching with batch comparators. "
+            "Resolving %d x %d = %d pairs via batch comparator. "
+            "Consider switching to key-field alignment "
+            "(x-eval-align: {match_by: 'key_field', key: ...}) or adding "
+            "deterministic/scorable fields to reduce ambiguity and cost.",
+            node.path, n, m, n * m,
+        )
+        for i in range(n):
+            for j in range(m):
+                process_batches(results_matrix[i][j], items_node)
+
+    # Build cost matrix from F1 scores.
+    # Note: post-processors (e.g. reclassify_nulls) are NOT applied here --
+    # they run after scoring in evaluate(). See array.md for details.
+    for i in range(n):
+        for j in range(m):
+            record = build_record_result(0, results_matrix[i][j], {}, {})
             score_matrix[i][j] = record.f1
 
     # Hungarian finds optimal matching (maximize total F1)

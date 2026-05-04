@@ -9,6 +9,8 @@ Covers:
 
 import pytest
 
+from struct_extract_eval.core.comparators.comparator import BatchItem, ComparatorResult
+from struct_extract_eval.core.comparators.registry import _clear_registry, register
 from struct_extract_eval.core.schema import SchemaError, parse_eval_schema
 from struct_extract_eval.core.scoring import score_record
 from struct_extract_eval.core.xeval import annotate_xeval
@@ -654,3 +656,76 @@ class TestHungarianAlignment:
         extracted = [{"tags": ["c", "a", "b"]}]
         result = evaluate(gold, extracted, raw_schema)
         assert result.mean_f1 == 1.0
+
+
+class TestHungarianWithBatchComparator:
+    """Hungarian matching resolves batch comparators before building cost matrix."""
+
+    def setup_method(self) -> None:
+        _clear_registry()
+
+    def teardown_method(self) -> None:
+        _clear_registry()
+
+    def test_batch_comparator_resolved_for_optimal_matching(self) -> None:
+        """Batch comparator scores inform Hungarian matching.
+
+        Without resolving batch fields, all pairs would have F1=1.0 (no
+        scorable fields) and matching would be arbitrary. With resolution,
+        Hungarian uses real scores to find the optimal pairing.
+
+        Gold: ["alpha desc", "beta desc"]
+        Extracted: ["beta desc", "alpha desc"]  (swapped order)
+
+        The fake judge scores 1.0 for exact matches, 0.0 otherwise.
+        Hungarian should match gold[0]->ext[1] and gold[1]->ext[0].
+        """
+        class FakeBatchComparator:
+            is_batch = True
+            name = "fake_semantic"
+            def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
+                results: list[ComparatorResult | None] = []
+                for item in items:
+                    score = 1.0 if item.gold_compared == item.extracted_compared else 0.0
+                    results.append(ComparatorResult(
+                        score=score, comparator=self.name,
+                        reason="match" if score == 1.0 else "mismatch",
+                    ))
+                return results
+
+        register("fake_semantic", FakeBatchComparator())
+
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "hungarian"},
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "description": {
+                                "type": "string",
+                                "x-eval-compare": "fake_semantic",
+                            },
+                        },
+                    },
+                },
+            },
+        })
+        results = score_record(
+            schema,
+            {"steps": [
+                {"description": "alpha desc"},
+                {"description": "beta desc"},
+            ]},
+            {"steps": [
+                {"description": "beta desc"},
+                {"description": "alpha desc"},
+            ]},
+        )
+        matches = [r for r in results if r.status == "match"]
+        mismatches = [r for r in results if r.status == "mismatch"]
+        # Optimal matching: both pairs match perfectly
+        assert len(matches) == 2
+        assert len(mismatches) == 0
