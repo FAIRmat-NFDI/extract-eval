@@ -36,8 +36,8 @@ class TestPropagateBatchErrors:
             ),
         ]
         propagate_batch_errors(results)
-        # All semantic fields are now skipped
-        assert all(r.status == "skipped" for r in results)
+        # All semantic fields are now batch_error
+        assert all(r.status == "batch_error" for r in results)
         assert all("tainted" in (r.reason or "") for r in results)
 
     def test_different_comparator_unaffected(self) -> None:
@@ -64,8 +64,8 @@ class TestPropagateBatchErrors:
         assert results[0].status == "match"
         assert results[3].status == "match"
         # semantic tainted
-        assert results[1].status == "skipped"
-        assert results[2].status == "skipped"
+        assert results[1].status == "batch_error"
+        assert results[2].status == "batch_error"
 
     def test_multiple_batch_comparators_independent(self) -> None:
         """bc1 has error, bc2 does not — only bc1 is tainted."""
@@ -88,9 +88,9 @@ class TestPropagateBatchErrors:
             ),
         ]
         propagate_batch_errors(results)
-        # bc1: all skipped
-        assert results[0].status == "skipped"
-        assert results[1].status == "skipped"
+        # bc1: all batch_error
+        assert results[0].status == "batch_error"
+        assert results[1].status == "batch_error"
         # bc2: untouched
         assert results[2].status == "match"
         assert results[3].status == "mismatch"
@@ -108,6 +108,38 @@ class TestPropagateBatchErrors:
             ),
         ]
         propagate_batch_errors(results)
-        # Both skipped, but the already-skipped one gets the tainted reason
-        assert results[0].status == "skipped"
-        assert results[1].status == "skipped"
+        # Both batch_error, the already-skipped one gets tainted to batch_error
+        assert results[0].status == "batch_error"
+        assert results[1].status == "batch_error"
+
+    def test_omission_not_converted(self) -> None:
+        """Omission results are structural -- not affected by batch tainting."""
+        results = [
+            FieldResult(
+                path="a", score=0.0, comparator="semantic",
+                gold_value="x", extracted_value=None, status="omission",
+            ),
+            FieldResult(
+                path="b", score=0.0, comparator="semantic",
+                gold_value="y", extracted_value="z", status="batch_error",
+            ),
+        ]
+        propagate_batch_errors(results)
+        assert results[0].status == "omission"
+        assert results[1].status == "batch_error"
+
+    def test_hallucination_not_converted(self) -> None:
+        """Hallucination results are structural -- not affected by batch tainting."""
+        results = [
+            FieldResult(
+                path="a", score=0.0, comparator="semantic",
+                gold_value=None, extracted_value="x", status="hallucination",
+            ),
+            FieldResult(
+                path="b", score=0.0, comparator="semantic",
+                gold_value="y", extracted_value="z", status="batch_error",
+            ),
+        ]
+        propagate_batch_errors(results)
+        assert results[0].status == "hallucination"
+        assert results[1].status == "batch_error"

@@ -1,14 +1,17 @@
-"""Batch error propagation: if any item in a batch failed, skip the whole batch.
+"""Batch error propagation: if any item in a batch failed, taint the whole batch.
 
 When a batch comparator (e.g. the LLM judge) produces a ``batch_error`` for
 one or more items, the other items in the same batch may also be unreliable:
 the judge might have miscounted, misaligned responses, or partially failed.
-This post-processor marks ALL items from a tainted batch as ``skipped`` so
-they don't pollute metrics.
+This post-processor marks sibling items from a tainted batch as
+``batch_error`` so they don't pollute metrics.
 
 Items are grouped by ``comparator`` name (the batch label). If ANY item in a
-group has ``status="batch_error"``, ALL items in that group are marked
-``skipped`` — both the errored ones and the ones that appeared to succeed.
+group has ``status="batch_error"``, all other items in that group that went
+through the batch path (match, mismatch, pending) are also marked
+``batch_error``. Omission and hallucination results are left untouched --
+they represent structural extraction failures detected before the batch
+comparator runs, and should remain visible in metrics.
 Items from unaffected batch comparators (or per-field comparators) are left
 untouched.
 
@@ -42,11 +45,14 @@ from struct_extract_eval.core.scoring import FieldResult
 def propagate_batch_errors(
     field_results: list[FieldResult],
 ) -> list[FieldResult]:
-    """If any item in a batch has batch_error, skip all items in that batch.
+    """If any item in a batch has batch_error, taint all items in that batch.
 
     Groups FieldResults by ``comparator`` name. For each group where at
-    least one result has ``status="batch_error"``, marks ALL results in
-    that group as ``status="skipped"`` with a reason explaining why.
+    least one result has ``status="batch_error"``, marks sibling results
+    as ``status="batch_error"`` with a reason explaining why.
+
+    Omission and hallucination results are never affected -- they are
+    structural issues detected before the comparator runs.
 
     Per-field comparators (exact, numeric, oneof, etc.) are never affected
     because they don't produce batch_error.
@@ -62,10 +68,12 @@ def propagate_batch_errors(
     if not tainted:
         return field_results
 
-    # Mark all items from tainted comparators as skipped
+    # Mark batch-path items from tainted comparators as batch_error.
+    # Leave omission/hallucination untouched -- those are structural
+    # issues that exist regardless of whether the batch comparator worked.
     for fr in field_results:
-        if fr.comparator in tainted:
-            fr.status = "skipped"
+        if fr.comparator in tainted and fr.status not in ("omission", "hallucination"):
+            fr.status = "batch_error"
             fr.score = 0.0
             fr.reason = (
                 f"batch tainted: comparator '{fr.comparator}' had errors "
