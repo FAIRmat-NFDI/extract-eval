@@ -150,6 +150,24 @@ def _score_object(
         elif extracted_has and not gold_has:
             results.extend(_hallucination_results(child, extracted_dict[field_name]))
 
+    # Extra keys in extracted that are not in the schema -> hallucinations.
+    # One hallucination per extra top-level key (no recursion into nested values).
+    schema_fields = {
+        child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
+        for child in node.children
+    }
+    for key in extracted_dict:
+        if key not in schema_fields:
+            path = f"{node.path}.{key}" if node.path else key
+            results.append(FieldResult(
+                path=path,
+                score=0.0,
+                comparator="",
+                gold_value=None,
+                extracted_value=extracted_dict[key],
+                status="hallucination",
+            ))
+
     return results
 
 

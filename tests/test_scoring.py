@@ -118,17 +118,21 @@ class TestMissingFields:
         assert by_path["email"].status == "hallucination"
         assert by_path["email"].score == 0.0
 
-    def test_extra_field_not_in_schema_ignored(self) -> None:
+    def test_extra_field_not_in_schema_is_hallucination(self) -> None:
         schema = _make_schema({
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
             },
         })
-        # "extra" is not in the schema at all -- invisible to the evaluator
+        # "extra" is not in the schema -- detected as hallucination
         results = score_record(schema, {"name": "Alice"}, {"name": "Alice", "extra": "ignored"})
-        assert len(results) == 1
+        assert len(results) == 2
         assert results[0].score == 1.0
+        assert results[1].status == "hallucination"
+        assert results[1].path == "extra"
+        assert results[1].extracted_value == "ignored"
+        assert results[1].gold_value is None
 
 
 # --- Null handling ---
