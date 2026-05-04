@@ -139,29 +139,25 @@ class TestProcessBatches:
             FieldResult(
                 path="x", score=0.0, comparator="always",
                 gold_value="g", extracted_value="e",
-                status="mismatch",
+                status="pending",
                 gold_compared="g", extracted_compared="e",
-                pending_batch="always",
             ),
         ]
         process_batches(results, _EMPTY_TREE)
         assert results[0].status == "match"
         assert results[0].score == 1.0
-        assert results[0].pending_batch is None
 
     def test_unregistered_handler_marks_batch_error(self) -> None:
         results = [
             FieldResult(
                 path="x", score=0.0, comparator="missing",
                 gold_value="g", extracted_value="e",
-                status="mismatch",
+                status="pending",
                 gold_compared="g", extracted_compared="e",
-                pending_batch="missing",
             ),
         ]
         process_batches(results, _EMPTY_TREE)
         assert results[0].status == "batch_error"
-        assert results[0].pending_batch is None
 
     def test_handler_raises_marks_all_batch_error(self) -> None:
         class Raising:
@@ -171,16 +167,13 @@ class TestProcessBatches:
         register("raising", Raising())
 
         results = [
-            FieldResult("a", 0.0, "raising", "g1", "e1", "mismatch",
-                        gold_compared="g1", extracted_compared="e1",
-                        pending_batch="raising"),
-            FieldResult("b", 0.0, "raising", "g2", "e2", "mismatch",
-                        gold_compared="g2", extracted_compared="e2",
-                        pending_batch="raising"),
+            FieldResult("a", 0.0, "raising", "g1", "e1", "pending",
+                        gold_compared="g1", extracted_compared="e1"),
+            FieldResult("b", 0.0, "raising", "g2", "e2", "pending",
+                        gold_compared="g2", extracted_compared="e2"),
         ]
         process_batches(results, _EMPTY_TREE)
         assert all(r.status == "batch_error" for r in results)
-        assert all(r.pending_batch is None for r in results)
 
     def test_short_response_marks_trailing_batch_error(self) -> None:
         class ShortResponse:
@@ -190,12 +183,10 @@ class TestProcessBatches:
         register("short", ShortResponse())
 
         results = [
-            FieldResult("a", 0.0, "short", "g1", "e1", "mismatch",
-                        gold_compared="g1", extracted_compared="e1",
-                        pending_batch="short"),
-            FieldResult("b", 0.0, "short", "g2", "e2", "mismatch",
-                        gold_compared="g2", extracted_compared="e2",
-                        pending_batch="short"),
+            FieldResult("a", 0.0, "short", "g1", "e1", "pending",
+                        gold_compared="g1", extracted_compared="e1"),
+            FieldResult("b", 0.0, "short", "g2", "e2", "pending",
+                        gold_compared="g2", extracted_compared="e2"),
         ]
         process_batches(results, _EMPTY_TREE)
         assert results[0].status == "match"
@@ -213,12 +204,10 @@ class TestProcessBatches:
         register("extra", ExtraResponse())
 
         results = [
-            FieldResult("a", 0.0, "extra", "g1", "e1", "mismatch",
-                        gold_compared="g1", extracted_compared="e1",
-                        pending_batch="extra"),
-            FieldResult("b", 0.0, "extra", "g2", "e2", "mismatch",
-                        gold_compared="g2", extracted_compared="e2",
-                        pending_batch="extra"),
+            FieldResult("a", 0.0, "extra", "g1", "e1", "pending",
+                        gold_compared="g1", extracted_compared="e1"),
+            FieldResult("b", 0.0, "extra", "g2", "e2", "pending",
+                        gold_compared="g2", extracted_compared="e2"),
         ]
         process_batches(results, _EMPTY_TREE)
         assert results[0].status == "match"
@@ -244,12 +233,12 @@ class TestProcessBatches:
         register("B", HandlerB())
 
         results = [
-            FieldResult("p1", 0.0, "A", "g", "e", "mismatch",
-                        gold_compared="g", extracted_compared="e", pending_batch="A"),
-            FieldResult("p2", 0.0, "B", "g", "e", "mismatch",
-                        gold_compared="g", extracted_compared="e", pending_batch="B"),
-            FieldResult("p3", 0.0, "A", "g", "e", "mismatch",
-                        gold_compared="g", extracted_compared="e", pending_batch="A"),
+            FieldResult("p1", 0.0, "A", "g", "e", "pending",
+                        gold_compared="g", extracted_compared="e"),
+            FieldResult("p2", 0.0, "B", "g", "e", "pending",
+                        gold_compared="g", extracted_compared="e"),
+            FieldResult("p3", 0.0, "A", "g", "e", "pending",
+                        gold_compared="g", extracted_compared="e"),
         ]
         process_batches(results, _EMPTY_TREE)
         assert calls == ["A", "B"] or calls == ["B", "A"]
@@ -272,11 +261,9 @@ class TestProcessBatches:
 
         results = [
             FieldResult("a", 0.0, "skipper", "g1", "e1", "pending",
-                        gold_compared="g1", extracted_compared="e1",
-                        pending_batch="skipper"),
+                        gold_compared="g1", extracted_compared="e1"),
             FieldResult("b", 0.0, "skipper", "g2", "e2", "pending",
-                        gold_compared="g2", extracted_compared="e2",
-                        pending_batch="skipper"),
+                        gold_compared="g2", extracted_compared="e2"),
         ]
         process_batches(results, _EMPTY_TREE)
         assert results[0].status == "match"
