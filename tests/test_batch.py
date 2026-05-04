@@ -32,7 +32,7 @@ from struct_extract_eval.core.comparators.registry import (
     register,
 )
 from struct_extract_eval.core.schema import SchemaNode
-from struct_extract_eval.core.scoring import FieldResult
+from struct_extract_eval.core.field_result import FieldResult
 from struct_extract_eval.evaluator import evaluate
 
 # Minimal empty tree for process_batches tests that don't need real schema params.

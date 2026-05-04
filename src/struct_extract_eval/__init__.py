@@ -11,7 +11,8 @@ from struct_extract_eval.core.record import (
 )
 from struct_extract_eval.core.schema import SchemaNode, parse_eval_schema
 from struct_extract_eval.core.schema_inference import infer_schema
-from struct_extract_eval.core.scoring import FieldResult, score_record
+from struct_extract_eval.core.field_result import FieldResult
+from struct_extract_eval.core.scoring import score_record
 from struct_extract_eval.core.transforms.transform import TransformSpec
 from struct_extract_eval.core.validation import GoldValidationError, validate_gold
 from struct_extract_eval.core.xeval import (

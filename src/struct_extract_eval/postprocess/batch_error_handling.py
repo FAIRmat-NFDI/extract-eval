@@ -42,7 +42,7 @@ Or combine with null handling::
     result = evaluate(gold, extracted, schema, post_process=my_post_process)
 """
 
-from struct_extract_eval.core.scoring import FieldResult
+from struct_extract_eval.core.field_result import FieldResult
 
 
 def propagate_batch_errors(

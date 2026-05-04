@@ -1,6 +1,6 @@
 """Tests for batch error propagation post-processor."""
 
-from struct_extract_eval.core.scoring import FieldResult
+from struct_extract_eval.core.field_result import FieldResult
 from struct_extract_eval.postprocess import propagate_batch_errors
 
 

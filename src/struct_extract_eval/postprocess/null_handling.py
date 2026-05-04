@@ -21,7 +21,7 @@ Usage::
 
 from dataclasses import dataclass, field
 
-from struct_extract_eval.core.scoring import FieldResult
+from struct_extract_eval.core.field_result import FieldResult
 
 
 @dataclass(frozen=True)

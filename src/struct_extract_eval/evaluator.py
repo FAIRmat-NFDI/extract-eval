@@ -28,7 +28,8 @@ from struct_extract_eval.core.record import (
     build_run_result,
 )
 from struct_extract_eval.core.schema import SchemaNode, parse_eval_schema
-from struct_extract_eval.core.scoring import FieldResult, score_record
+from struct_extract_eval.core.field_result import FieldResult
+from struct_extract_eval.core.scoring import score_record
 
 # Type alias for post-processing hooks
 PostProcess = Callable[[list[FieldResult]], list[FieldResult]]
