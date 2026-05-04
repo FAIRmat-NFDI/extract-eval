@@ -35,7 +35,7 @@ from struct_extract_eval.core.comparators.comparator import (
 )
 from struct_extract_eval.core.comparators.registry import get_comparator, is_batch
 from struct_extract_eval.core.schema import SchemaNode
-from struct_extract_eval.core.scoring import FieldResult
+from struct_extract_eval.core.field_result import FieldResult
 
 logger = logging.getLogger(__name__)
 
