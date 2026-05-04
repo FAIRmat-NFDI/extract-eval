@@ -362,8 +362,9 @@ def _score_array_hungarian(
         logger.warning(
             "Array at '%s' uses Hungarian matching with batch comparators. "
             "Resolving %d x %d = %d pairs via batch comparator. "
-            "Consider adding a key field (x-eval-align.key) or deterministic "
-            "fields to avoid this cost.",
+            "Consider switching to key-field alignment "
+            "(x-eval-align: {match_by: 'key_field', key: ...}) or adding "
+            "deterministic/scorable fields to reduce ambiguity and cost.",
             node.path, n, m, n * m,
         )
         for i in range(n):
