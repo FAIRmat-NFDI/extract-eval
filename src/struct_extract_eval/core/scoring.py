@@ -83,10 +83,10 @@ FieldStatus = Literal[
 class FieldResult:
     """Result of comparing a single field between gold and extracted.
 
-    ``pending_batch`` is set when the field's comparator is a BatchComparator.
-    The scoring layer leaves these with ``status="pending"`` and ``score=0.0``.
+    Fields with ``status="pending"`` use a BatchComparator. The scoring layer
+    leaves these with ``score=0.0`` and the comparator name in ``comparator``.
     A later pass via ``process_batches`` dispatches them to the registered
-    batch handler and updates score/status/reason/pending_batch in place.
+    batch handler and updates score/status/reason in place.
 
     ``gold_compared`` and ``extracted_compared`` are the values the comparator
     actually saw, after transforms were applied. When there are no transforms,
@@ -107,7 +107,6 @@ class FieldResult:
     reason: str | None = None
     gold_compared: object | None = None
     extracted_compared: object | None = None
-    pending_batch: str | None = None
 
 
 def score_record(
@@ -604,6 +603,7 @@ def _score_leaf(
     if is_batch(comparator_fn):
         # Defer: build a provisional FieldResult, mark pending. process_batches
         # will dispatch this to the registered batch handler later.
+        # The comparator name identifies which batch handler to use.
         return FieldResult(
             path=node.path,
             score=0.0,
@@ -613,7 +613,6 @@ def _score_leaf(
             status="pending",
             gold_compared=gold_transformed,
             extracted_compared=extracted_transformed,
-            pending_batch=node.comparator.name,
         )
 
     # Per-field comparator: call inline

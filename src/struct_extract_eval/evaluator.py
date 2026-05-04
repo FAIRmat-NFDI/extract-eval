@@ -41,7 +41,7 @@ def _run_evaluation(
 ) -> RunResult:
     """Score all pairs against a parsed schema tree.
 
-    Any field with ``pending_batch`` set is resolved via ``process_batches``
+    Any field with ``status="pending"`` is resolved via ``process_batches``
     after per-record scoring. ``post_process`` (if provided) runs last,
     after batch dispatch.
     """
