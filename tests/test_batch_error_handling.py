@@ -95,12 +95,13 @@ class TestPropagateBatchErrors:
         assert results[2].status == "match"
         assert results[3].status == "mismatch"
 
-    def test_already_skipped_not_double_processed(self) -> None:
+    def test_skipped_sibling_also_tainted(self) -> None:
+        """A batch-handler skip (ComparatorResult(skip=True)) is also tainted."""
         results = [
             FieldResult(
                 path="a", score=0.0, comparator="semantic",
                 gold_value="x", extracted_value="y", status="skipped",
-                reason="x-eval-skip",
+                reason="batch handler skipped",
             ),
             FieldResult(
                 path="b", score=0.0, comparator="semantic",
@@ -108,7 +109,7 @@ class TestPropagateBatchErrors:
             ),
         ]
         propagate_batch_errors(results)
-        # Both batch_error, the already-skipped one gets tainted to batch_error
+        # Both become batch_error when the batch is tainted
         assert results[0].status == "batch_error"
         assert results[1].status == "batch_error"
 

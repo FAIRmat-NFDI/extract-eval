@@ -7,11 +7,14 @@ This post-processor marks sibling items from a tainted batch as
 ``batch_error`` so they don't pollute metrics.
 
 Items are grouped by ``comparator`` name (the batch label). If ANY item in a
-group has ``status="batch_error"``, all other items in that group that went
-through the batch path (match, mismatch, pending) are also marked
-``batch_error``. Omission and hallucination results are left untouched --
-they represent structural extraction failures detected before the batch
-comparator runs, and should remain visible in metrics.
+group has ``status="batch_error"``, all other items in that group are also
+marked ``batch_error`` -- except omission and hallucination, which represent
+structural extraction failures detected before the batch comparator runs
+and should remain visible in metrics.
+
+This post-processor runs after ``process_batches``, so ``pending`` statuses
+should not exist. The statuses actually converted are: ``match``,
+``mismatch``, ``skipped``, and ``batch_error`` (already that status).
 Items from unaffected batch comparators (or per-field comparators) are left
 untouched.
 

@@ -96,7 +96,7 @@ class SemanticBatchComparator:
                 )
                 scores = []
 
-            if len(scores) < len(pending):
+            if scores and len(scores) < len(pending):
                 logger.warning(
                     "Semantic judge returned %d scores for %d items "
                     "(at paths %s). Missing items will be marked as "
