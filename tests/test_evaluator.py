@@ -1,9 +1,15 @@
-from struct_extract_eval.evaluator import evaluate, generate_eval_schema
+from copy import deepcopy
+
+from struct_extract_eval.core.schema_inference import infer_schema
+from struct_extract_eval.core.xeval import annotate_xeval
+from struct_extract_eval.evaluator import evaluate
 
 
 def _eval_schema(resolved: dict[str, object]) -> dict[str, object]:
     """Helper: annotate a resolved schema with x-eval-* defaults for tests."""
-    return generate_eval_schema(schema=resolved)
+    schema = deepcopy(resolved)
+    annotate_xeval(schema)
+    return schema
 
 
 class TestEvaluate:
@@ -49,8 +55,9 @@ class TestEvaluate:
     def test_infer_schema_from_gold(self) -> None:
         gold = [{"name": "Alice", "age": 30}]
         extracted = [{"name": "Alice", "age": 30}]
-        schema = generate_eval_schema(gold=gold)
-        run = evaluate(gold, extracted, schema=schema)
+        resolved = infer_schema(gold)
+        annotate_xeval(resolved)
+        run = evaluate(gold, extracted, schema=resolved)
         assert run.mean_f1 == 1.0
         assert run.total_records == 1
 
@@ -95,7 +102,11 @@ class TestEvaluate:
             "properties": {"name": {"type": "string"}},
         })
         try:
-            evaluate([{"name": "A"}], [{"name": "A"}, {"name": "B"}], schema=schema)
+            evaluate(
+                [{"name": "A"}],
+                [{"name": "A"}, {"name": "B"}],
+                schema=schema,
+            )
             assert False, "Should have raised"
         except ValueError as e:
             assert "length" in str(e).lower()
@@ -164,34 +175,6 @@ class TestEvaluate:
             },
         })
         gold = [{"tags": ["a", "b", "c"]}]
-        extracted = [{"tags": ["a", "x"]}]  # 1 match, 1 mismatch (b->x), 1 omission (c), no hallucination
+        extracted = [{"tags": ["a", "x"]}]
         run = evaluate(gold, extracted, schema=schema)
         assert run.total_omissions == 1
-
-
-class TestGenerateEvalSchema:
-    def test_from_gold(self) -> None:
-        schema = generate_eval_schema(gold=[{"name": "Alice", "age": 30}])
-        assert schema["properties"]["name"]["x-eval-compare"] == "exact"
-        assert schema["properties"]["age"]["x-eval-compare"] == "numeric"
-
-    def test_from_schema(self) -> None:
-        resolved = {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "temp": {"type": "number"},
-            },
-        }
-        schema = generate_eval_schema(schema=resolved)
-        assert schema["properties"]["name"]["x-eval-compare"] == "exact"
-        assert schema["properties"]["temp"]["x-eval-compare"] == "numeric"
-        # original not mutated
-        assert "x-eval-compare" not in resolved["properties"]["name"]
-
-    def test_no_args_raises(self) -> None:
-        try:
-            generate_eval_schema()
-            assert False, "Should have raised"
-        except ValueError as e:
-            assert "gold" in str(e).lower() or "schema" in str(e).lower()

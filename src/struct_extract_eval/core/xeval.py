@@ -1,15 +1,66 @@
 """x-eval-* utilities.
 
-``add_default_xeval`` annotates a resolved schema in-place with sensible
-``x-eval-*`` defaults. Leaf fields without an existing ``x-eval-compare``
-or ``x-eval-skip`` get an explicit ``x-eval-compare`` inferred from type.
-``x-eval-required`` is only annotated when ``false``; the default is ``true``.
+``annotate_xeval`` annotates a resolved schema in-place with ``x-eval-*``
+defaults. Leaf fields without an existing ``x-eval-compare`` or
+``x-eval-skip`` get a comparator from the internal type-defaults mapping.
+
+Use ``set_type_default`` to change the default comparator for a JSON type.
 
 ``parse_xeval_entry`` is the shared parser for the two-shape rule used
 by both ``x-eval-transform`` and ``x-eval-compare``.
 """
 
 from struct_extract_eval.core.json_utils import get_children, is_leaf, resolve_type
+
+_BUILTIN_TYPE_DEFAULTS: dict[str, str] = {
+    "string": "exact",
+    "number": "numeric",
+    "integer": "numeric",
+    "boolean": "exact",
+}
+
+
+def set_type_default(json_type: str, comparator: str) -> None:
+    """Set the default comparator for a JSON type.
+
+    Affects all subsequent ``annotate_xeval()`` calls. Persistent for
+    the lifetime of the process.
+
+    Args:
+        json_type: JSON Schema type (e.g. ``"string"``, ``"number"``).
+        comparator: Comparator name to use as default for this type.
+            Must be registered in the comparator registry before
+            ``evaluate()`` is called.
+
+    Example::
+
+        set_type_default("string", "semantic")  # all strings -> LLM judge
+        annotate_xeval(schema)
+    """
+    if not isinstance(json_type, str) or not json_type:
+        raise ValueError(
+            f"json_type must be a non-empty string, got {json_type!r}"
+        )
+    if not isinstance(comparator, str) or not comparator:
+        raise ValueError(
+            f"comparator must be a non-empty string, got {comparator!r}"
+        )
+    _BUILTIN_TYPE_DEFAULTS[json_type] = comparator
+
+
+def reset_type_defaults() -> None:
+    """Reset the type-defaults mapping to the built-in defaults.
+
+    Undoes all ``set_type_default()`` calls. Useful in tests or when
+    switching between configurations in the same process.
+    """
+    _BUILTIN_TYPE_DEFAULTS.clear()
+    _BUILTIN_TYPE_DEFAULTS.update({
+        "string": "exact",
+        "number": "numeric",
+        "integer": "numeric",
+        "boolean": "exact",
+    })
 
 
 def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, object]]:
@@ -43,27 +94,19 @@ def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, ob
     )
 
 
-def _default_comparator(schema: dict[str, object]) -> str:
-    """Infer the default comparator from the schema node's type."""
-    json_type = resolve_type(schema)
-    if json_type in ("number", "integer"):
-        return "numeric"
-    return "exact"
-
-
-def add_default_xeval(schema: dict[str, object]) -> dict[str, object]:
+def annotate_xeval(schema: dict[str, object]) -> dict[str, object]:
     """Annotate a resolved schema in-place with ``x-eval-*`` defaults.
 
     Walks the schema tree. For each leaf node without an explicit
-    ``x-eval-compare`` or ``x-eval-skip``, infers the comparator from
-    the node's type.
-    For each property of an object, infers ``x-eval-required`` from
-    the parent's ``required`` array (explicit ``x-eval-required`` is
-    never overridden). The ``required`` array is then removed -- the
-    eval schema uses only ``x-eval-required`` (annotated only when
-    ``false``; ``true`` is the default).
+    ``x-eval-compare`` or ``x-eval-skip``, assigns a comparator from
+    the internal type-defaults mapping. Use ``set_type_default()`` to
+    customize the mapping before calling.
 
-    Returns the schema for convenience (same object, mutated in-place).
+    Other keys in the schema (e.g. ``required``, ``type``, ``properties``)
+    are left untouched.
+
+    Returns:
+        The schema for convenience (same object, mutated in-place).
     """
     _annotate_node(schema)
     return schema
@@ -73,31 +116,11 @@ def _annotate_node(schema: dict[str, object]) -> None:
     """Recursively annotate a single schema node."""
     if is_leaf(schema):
         if "x-eval-compare" not in schema and "x-eval-skip" not in schema:
-            schema["x-eval-compare"] = _default_comparator(schema)
+            json_type = resolve_type(schema)
+            comparator = _BUILTIN_TYPE_DEFAULTS.get(json_type or "", "exact")
+            schema["x-eval-compare"] = comparator
         return
 
-    # Container node (object or array): set x-eval-required on children,
-    # then recurse.
-    required_raw = schema.get("required")
-    required_keys: set[str] | None = None
-    if isinstance(required_raw, list):
-        required_keys = set()
-        for idx, value in enumerate(required_raw):
-            if not isinstance(value, str):
-                raise TypeError(
-                    f"Schema 'required' entries must be strings, got "
-                    f"{type(value).__name__} at index {idx}: {value!r}"
-                )
-            required_keys.add(value)
-
-    for field_name, child_schema, _child_path in get_children(schema):
-        # Only mark x-eval-required: false for fields not in the required array.
-        # Default is true, so no annotation needed for required fields.
-        if field_name != "[]" and "x-eval-required" not in child_schema:
-            if required_keys is not None and field_name not in required_keys:
-                child_schema["x-eval-required"] = False
-
+    # Container node (object or array): recurse into children.
+    for _field_name, child_schema, _child_path in get_children(schema):
         _annotate_node(child_schema)
-
-    # Remove the JSON Schema required array -- eval schema uses only x-eval-required.
-    schema.pop("required", None)

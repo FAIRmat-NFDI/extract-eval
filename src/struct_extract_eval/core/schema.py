@@ -1,9 +1,9 @@
-"""SchemaNode tree and parse_schema.
+"""SchemaNode tree and parse_eval_schema.
 
 Parses an eval schema (resolved schema + x-eval-* extensions) into a
 SchemaNode tree. All downstream scoring code works with SchemaNode.
 
-Call add_default_xeval() to get eval schema -- parse_schema
+Call annotate_xeval() to get eval schema -- parse_eval_schema
 does not assign comparator defaults for leaf nodes, it validates
 and parses. Container nodes (objects/arrays) get a placeholder
 comparator since they are scored via their children, not directly.
@@ -29,10 +29,10 @@ logger = logging.getLogger(__name__)
 
 _KNOWN_XEVAL_KEYS = frozenset(
     {
-        "x-eval-required",
         "x-eval-compare",
         "x-eval-transform",
         "x-eval-skip",
+        "x-eval-align",
     }
 )
 
@@ -54,9 +54,10 @@ class SchemaNode:
     json_type: str
     comparator: ComparatorSpec = field(default_factory=ComparatorSpec)
     children: list["SchemaNode"] = field(default_factory=list)
-    required: bool = True
     skip: bool = False
     transforms: list[TransformSpec] = field(default_factory=list)
+    # Array-only. None for leaf and object nodes.
+    align: dict[str, object] | None = None
 
 
 def _validate_xeval(schema: dict[str, object], path: str) -> None:
@@ -70,11 +71,93 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
         if key.startswith("x-eval-") and key not in _KNOWN_XEVAL_KEYS:
             logger.warning("Unknown x-eval key '%s' at path '%s'", key, path)
 
-    if "x-eval-required" in schema and not isinstance(schema["x-eval-required"], bool):
-        raise SchemaError("x-eval-required must be a boolean", path)
-
     if "x-eval-skip" in schema and not isinstance(schema["x-eval-skip"], bool):
         raise SchemaError("x-eval-skip must be a boolean", path)
+
+    if "x-eval-align" in schema:
+        if resolve_type(schema) != "array":
+            raise SchemaError(
+                "x-eval-align is only valid on array nodes, "
+                f"but this node has type '{resolve_type(schema)}'",
+                path,
+            )
+        raw_align = schema["x-eval-align"]
+        if not isinstance(raw_align, dict):
+            raise SchemaError("x-eval-align must be a dict", path)
+        if "ordered" not in raw_align and "match_by" not in raw_align:
+            raise SchemaError(
+                "x-eval-align must have 'ordered' or 'match_by' key", path
+            )
+        if "ordered" in raw_align and not isinstance(raw_align["ordered"], bool):
+            raise SchemaError(
+                "x-eval-align 'ordered' must be a boolean", path
+            )
+        if raw_align.get("ordered") is False and "match_by" not in raw_align:
+            raise SchemaError(
+                "x-eval-align with ordered=false must specify 'match_by'",
+                path,
+            )
+        match_by = raw_align.get("match_by")
+        if match_by is not None:
+            if not isinstance(match_by, str) or not match_by:
+                raise SchemaError(
+                    "x-eval-align 'match_by' must be a non-empty string",
+                    path,
+                )
+            _VALID_MATCH_BY = {"key_field", "hungarian"}
+            if match_by not in _VALID_MATCH_BY:
+                raise SchemaError(
+                    f"x-eval-align 'match_by' must be one of "
+                    f"{sorted(_VALID_MATCH_BY)}, got {match_by!r}",
+                    path,
+                )
+        if match_by == "key_field":
+            if "key" not in raw_align:
+                raise SchemaError(
+                    "x-eval-align with match_by='key_field' "
+                    "requires a 'key'",
+                    path,
+                )
+            key_name = raw_align["key"]
+            if not isinstance(key_name, str) or not key_name:
+                raise SchemaError(
+                    "x-eval-align 'key' must be a non-empty string",
+                    path,
+                )
+            # Validate key field against items schema.
+            # Errors for structurally impossible cases.
+            # Warns when matching might work on data but schema is incomplete,
+            # for example, array have object type, without items property,
+            # match_by key comparator cannot check if the key exists.
+            items_schema = schema.get("items")
+            if not isinstance(items_schema, dict):
+                raise SchemaError(
+                    "x-eval-align with match_by='key_field' requires "
+                    "'items' to be an object schema",
+                    path,
+                )
+            items_type = resolve_type(items_schema)
+            if items_type is not None and items_type != "object":
+                raise SchemaError(
+                    f"x-eval-align with match_by='key_field' requires "
+                    f"items type 'object', got '{items_type}'",
+                    path,
+                )
+            items_props = items_schema.get("properties")
+            if not isinstance(items_props, dict):
+                logger.warning(
+                    "Path '%s': x-eval-align match_by='key_field' but items "
+                    "has no 'properties'. Key-field matching will attempt to "
+                    "match on data, but no per-field scoring is possible.",
+                    path,
+                )
+            elif key_name not in items_props:
+                logger.warning(
+                    "Path '%s': x-eval-align key '%s' not found in items "
+                    "properties %s. Key-field matching will attempt to match "
+                    "on data anyway.",
+                    path, key_name, sorted(items_props),
+                )
 
     if "x-eval-compare" in schema:
         raw_compare = schema["x-eval-compare"]
@@ -101,6 +184,22 @@ def _validate_xeval(schema: dict[str, object], path: str) -> None:
         except ComparatorNotFoundError as err:
             raise SchemaError(f"Unknown comparator: '{comparator_name}'", path) from err
 
+        # Warn about type-comparator mismatches for built-in comparators.
+        # Custom comparators are not checked -- the user knows their intent.
+        json_type = resolve_type(schema)
+        if comparator_name == "numeric" and json_type in ("string", "boolean"):
+            logger.warning(
+                "Path '%s': 'numeric' comparator on '%s' field. "
+                "numeric expects a number -- did you mean 'exact'?",
+                path, json_type,
+            )
+        if comparator_name == "exact" and json_type in ("number", "integer"):
+            logger.warning(
+                "Path '%s': 'exact' comparator on '%s' field. "
+                "exact requires identical type+value (e.g. 42 != 42.0). "
+                "Consider 'numeric' for tolerance-based comparison.",
+                path, json_type,
+            )
     if "x-eval-transform" in schema:
         raw = schema["x-eval-transform"]
         if not isinstance(raw, list):
@@ -137,7 +236,7 @@ def _resolve_comparator_spec(
     if "x-eval-compare" not in schema:
         if is_leaf(schema) and not schema.get("x-eval-skip"):
             raise SchemaError(
-                "missing x-eval-compare -- run add_default_xeval first", path
+                "missing x-eval-compare -- run annotate_xeval first", path
             )
         return ComparatorSpec()
 
@@ -193,21 +292,26 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
         children=children,
         transforms=transforms,
     )
-    if "x-eval-required" in schema:
-        node.required = schema["x-eval-required"]
     if schema.get("x-eval-skip"):
         node.skip = True
+    if "x-eval-align" in schema:
+        # Validation already confirmed it's a dict
+        raw_align = schema["x-eval-align"]
+        assert isinstance(raw_align, dict)  # for mypy
+        node.align = raw_align
     return node
 
 
-def parse_schema(raw_schema: dict[str, object]) -> SchemaNode:
+def parse_eval_schema(raw_schema: dict[str, object]) -> SchemaNode:
     """Parse an eval schema into a SchemaNode tree.
 
     Expects:
     - $ref and allOf resolved by the caller
-    - x-eval-* defaults filled in by add_default_xeval
+    - x-eval-* defaults filled in by annotate_xeval
 
-    Validates all x-eval-* keys at parse time. Does not assign defaults.
+    Validates all x-eval-* keys at parse time: unknown comparators,
+    unknown transforms, invalid types, bad x-eval-* config all raise
+    SchemaError immediately. Does not assign defaults.
     """
     if not isinstance(raw_schema, dict):
         raise SchemaError("Eval schema must be an object")

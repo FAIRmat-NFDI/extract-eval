@@ -66,7 +66,7 @@ def get_children(
 
     items = schema.get("items")
     if isinstance(items, dict) and not children:
-        child_path = f"{path}[]" if path else "[]"
+        child_path = f"{path}[]"
         # "[]" is a special field name for array items, to distinguish
         # from object properties named "items"
         # do not add . between path and [] like child_path = f"{path}.[]" if path else "[]" to distinguish field name called "[]"

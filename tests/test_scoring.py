@@ -1,12 +1,12 @@
 from struct_extract_eval.core.scoring import score_record
-from struct_extract_eval.core.schema import parse_schema
-from struct_extract_eval.core.xeval import add_default_xeval
+from struct_extract_eval.core.schema import parse_eval_schema
+from struct_extract_eval.core.xeval import annotate_xeval
 
 
 def _make_schema(raw: dict[str, object]) -> "SchemaNode":  # noqa: F821
     """Helper: add defaults + parse into SchemaNode."""
-    add_default_xeval(raw)
-    return parse_schema(raw)
+    annotate_xeval(raw)
+    return parse_eval_schema(raw)
 
 
 # --- Flat objects ---
@@ -78,7 +78,7 @@ class TestMissingFields:
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
-                "email": {"type": "string", "x-eval-required": False},
+                "email": {"type": "string"},
             },
         })
         results = score_record(schema, {"name": "Alice", "email": "a@b.com"}, {"name": "Alice"})
@@ -94,7 +94,7 @@ class TestMissingFields:
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
-                "email": {"type": "string", "x-eval-required": False},
+                "email": {"type": "string"},
             },
         })
         results = score_record(schema, {"name": "Alice"}, {"name": "Alice"})
@@ -107,7 +107,7 @@ class TestMissingFields:
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
-                "email": {"type": "string", "x-eval-required": False},
+                "email": {"type": "string"},
             },
         })
         results = score_record(schema, {"name": "Alice"}, {"name": "Alice", "email": "a@b.com"})
@@ -118,17 +118,60 @@ class TestMissingFields:
         assert by_path["email"].status == "hallucination"
         assert by_path["email"].score == 0.0
 
-    def test_extra_field_not_in_schema_ignored(self) -> None:
+    def test_extra_field_not_in_schema_is_hallucination(self) -> None:
         schema = _make_schema({
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
             },
         })
-        # "extra" is not in the schema at all -- invisible to the evaluator
+        # "extra" is not in the schema -- detected as hallucination
         results = score_record(schema, {"name": "Alice"}, {"name": "Alice", "extra": "ignored"})
-        assert len(results) == 1
-        assert results[0].score == 1.0
+        by_path = {r.path: r for r in results}
+        assert len(results) == 2
+        assert by_path["name"].score == 1.0
+        assert by_path["extra"].status == "hallucination"
+        assert by_path["extra"].extracted_value == "ignored"
+        assert by_path["extra"].gold_value is None
+
+    def test_multiple_extra_fields_sorted_order(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+            },
+        })
+        # Multiple extra keys -- hallucinations emitted in sorted order
+        results = score_record(
+            schema,
+            {"name": "Alice"},
+            {"name": "Alice", "zebra": 1, "alpha": 2, "mid": 3},
+        )
+        hallucinations = [r for r in results if r.status == "hallucination"]
+        assert len(hallucinations) == 3
+        assert [h.path for h in hallucinations] == ["alpha", "mid", "zebra"]
+
+    def test_extra_field_in_nested_object(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "details": {
+                    "type": "object",
+                    "properties": {
+                        "color": {"type": "string"},
+                    },
+                },
+            },
+        })
+        results = score_record(
+            schema,
+            {"details": {"color": "red"}},
+            {"details": {"color": "red", "weight": 5}},
+        )
+        by_path = {r.path: r for r in results}
+        assert by_path["details.color"].status == "match"
+        assert by_path["details.weight"].status == "hallucination"
+        assert by_path["details.weight"].extracted_value == 5
 
 
 # --- Null handling ---
@@ -414,45 +457,44 @@ class TestArrayTypeErrors:
         })
 
     def test_gold_list_extracted_not_list(self) -> None:
-        # gold=[a,b], extracted="bad" -> 2 omissions per element
+        # gold=[a,b], extracted="bad" -> skipped (invalid extracted type)
         schema = self._schema()
         results = score_record(schema, {"tags": ["a", "b"]}, {"tags": "bad"})
-        assert len(results) == 2
-        assert all(r.status == "omission" for r in results)
-        assert all(r.path == "tags[]" for r in results)
+        assert len(results) == 1
+        assert results[0].status == "skipped"
+        assert "invalid extracted type" in results[0].reason
 
     def test_gold_not_list_extracted_list(self) -> None:
-        # gold="bad", extracted=[a,b] -> 2 hallucinations per element
+        # gold="bad", extracted=[a,b] -> skipped (invalid gold type)
         schema = self._schema()
         results = score_record(schema, {"tags": "bad"}, {"tags": ["a", "b"]})
-        assert len(results) == 2
-        assert all(r.status == "hallucination" for r in results)
-        assert all(r.path == "tags[]" for r in results)
+        assert len(results) == 1
+        assert results[0].status == "skipped"
+        assert "invalid gold type" in results[0].reason
 
     def test_gold_empty_extracted_not_list(self) -> None:
-        # gold=[], extracted="bad" -> 1 mismatch for the array node
+        # gold=[], extracted="bad" -> skipped (invalid extracted type)
         schema = self._schema()
         results = score_record(schema, {"tags": []}, {"tags": "bad"})
         assert len(results) == 1
         assert results[0].path == "tags"
-        assert results[0].status == "mismatch"
-        assert results[0].score == 0.0
+        assert results[0].status == "skipped"
 
     def test_gold_not_list_extracted_empty(self) -> None:
-        # gold="bad", extracted=[] -> 1 mismatch for the array node
+        # gold="bad", extracted=[] -> skipped (invalid gold type)
         schema = self._schema()
         results = score_record(schema, {"tags": "bad"}, {"tags": []})
         assert len(results) == 1
         assert results[0].path == "tags"
-        assert results[0].status == "mismatch"
+        assert results[0].status == "skipped"
 
     def test_both_not_list(self) -> None:
-        # gold="bad", extracted="bad" -> 1 mismatch for the array node
+        # gold="bad", extracted="bad" -> skipped (invalid gold type)
         schema = self._schema()
         results = score_record(schema, {"tags": "bad"}, {"tags": "also_bad"})
         assert len(results) == 1
         assert results[0].path == "tags"
-        assert results[0].status == "mismatch"
+        assert results[0].status == "skipped"
 
     def test_gold_not_list_extracted_missing(self) -> None:
         # gold="bad", extracted missing -> 1 omission for the array node
@@ -542,6 +584,128 @@ class TestDeeplyNested:
         assert len(omissions) == 2  # S2's id and value
 
 
+# --- Array Instance paths ---
+
+
+class TestArrayInstancePaths:
+    """FieldResult.path should carry element indices for array elements."""
+
+    def test_flat_array_elements_have_indices(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+        })
+        results = score_record(schema, {"tags": ["a", "b"]}, {"tags": ["a", "b"]})
+        assert results[0].path == "tags[0]"
+        assert results[1].path == "tags[1]"
+
+    def test_array_of_objects_elements_have_indices(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "steps": {"type": "array", "items": {"type": "object", "properties": {
+                    "name": {"type": "string"},
+                    "temp": {"type": "number"},
+                }}},
+            },
+        })
+        gold = {"steps": [{"name": "deposit", "temp": 300}, {"name": "anneal", "temp": 500}]}
+        ext = {"steps": [{"name": "deposit", "temp": 300}, {"name": "anneal", "temp": 999}]}
+        results = score_record(schema, gold, ext)
+        paths = [r.path for r in results]
+        assert "steps[0].name" in paths
+        assert "steps[0].temp" in paths
+        assert "steps[1].name" in paths
+        assert "steps[1].temp" in paths
+
+    def test_omissions_have_indices(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+        })
+        results = score_record(schema, {"tags": ["a", "b", "c"]}, {"tags": ["a"]})
+        assert results[0].path == "tags[0]"  # match
+        assert results[1].path == "tags[1]"  # omission
+        assert results[2].path == "tags[2]"  # omission
+
+    def test_hallucinations_have_indices(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+        })
+        results = score_record(schema, {"tags": ["a"]}, {"tags": ["a", "b", "c"]})
+        assert results[0].path == "tags[0]"  # match
+        assert results[1].path == "tags[-1]"  # hallucination (no gold counterpart)
+        assert results[2].path == "tags[-1]"  # hallucination (no gold counterpart)
+
+    def test_nested_arrays_both_levels_have_indices(self) -> None:
+        """layers[0].steps[1].temp -- each array level gets its own index."""
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "layers": {"type": "array", "items": {"type": "object", "properties": {
+                    "name": {"type": "string"},
+                    "steps": {"type": "array", "items": {"type": "object", "properties": {
+                        "action": {"type": "string"},
+                        "temp": {"type": "number"},
+                    }}},
+                }}},
+            },
+        })
+        gold = {"layers": [
+            {"name": "L1", "steps": [
+                {"action": "deposit", "temp": 300},
+                {"action": "anneal", "temp": 500},
+            ]},
+            {"name": "L2", "steps": [
+                {"action": "etch", "temp": 100},
+            ]},
+        ]}
+        ext = {"layers": [
+            {"name": "L1", "steps": [
+                {"action": "deposit", "temp": 300},
+                {"action": "anneal", "temp": 999},
+            ]},
+            {"name": "L2", "steps": [
+                {"action": "etch", "temp": 100},
+            ]},
+        ]}
+        results = score_record(schema, gold, ext)
+        paths = [r.path for r in results]
+        # Outer array: layers[0], layers[1]
+        assert "layers[0].name" in paths
+        assert "layers[1].name" in paths
+        # Inner array: steps[0], steps[1] under each layer
+        assert "layers[0].steps[0].action" in paths
+        assert "layers[0].steps[0].temp" in paths
+        assert "layers[0].steps[1].action" in paths
+        assert "layers[0].steps[1].temp" in paths
+        assert "layers[1].steps[0].action" in paths
+        assert "layers[1].steps[0].temp" in paths
+        # Verify the mismatch is at the right path
+        mismatch = [r for r in results if r.status == "mismatch"]
+        assert len(mismatch) == 1
+        assert mismatch[0].path == "layers[0].steps[1].temp"
+
+    def test_empty_array_match_uses_array_path_not_element(self) -> None:
+        """[] vs [] is a match on the array node itself, no element index."""
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+        })
+        results = score_record(schema, {"tags": []}, {"tags": []})
+        assert len(results) == 1
+        assert results[0].path == "tags"  # array-level, no index
+
+
 # --- Skip fields ---
 
 
@@ -606,7 +770,7 @@ class TestSkipFields:
         assert by_path["description"].status == "skipped"
 
     def test_skip_excluded_from_metrics(self) -> None:
-        # x-eval-required: true (default) + x-eval-skip: true
+        # x-eval-skip: true
         # skip fields appear in results but don't affect precision/recall/F1
         schema = _make_schema({
             "type": "object",

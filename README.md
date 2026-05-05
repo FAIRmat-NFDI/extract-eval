@@ -53,7 +53,7 @@ human** before running. There is no "do everything automatically" mode.
 
 ```python
 import json
-from struct_extract_eval import evaluate, generate_eval_schema
+from struct_extract_eval import evaluate, infer_schema, add_default_xeval
 
 gold = [
     {"method": "sputtering", "temperature": 300, "lab_id": "A1"},
@@ -64,8 +64,9 @@ extracted = [
     {"method": "evaporation", "temperature": 460, "lab_id": "B3"},
 ]
 
-# 1. Generate an eval schema from gold (or provide your own resolved schema)
-eval_schema = generate_eval_schema(gold=gold)
+# 1. Infer a resolved schema from gold, then add eval defaults
+eval_schema = infer_schema(gold)
+add_default_xeval(eval_schema)
 with open("eval_schema.json", "w") as f:
     json.dump(eval_schema, f, indent=2)
 
@@ -150,9 +151,11 @@ Add `x-eval-*` extension keys that tell the evaluator how to compare each field:
 
 ```python
 import json
-from struct_extract_eval import generate_eval_schema
+from copy import deepcopy
+from struct_extract_eval import add_default_xeval
 
-eval_schema = generate_eval_schema(schema=resolved_schema)
+eval_schema = deepcopy(resolved_schema)
+add_default_xeval(eval_schema)  # mutates in-place
 with open("eval_schema.json", "w") as f:
     json.dump(eval_schema, f, indent=2)
 ```
@@ -165,7 +168,6 @@ This produces an eval schema with defaults:
   "properties": {
     "lab_id": {
       "type": "string",
-      "x-eval-required": false,
       "x-eval-compare": "exact"
     },
     "method": {
@@ -180,10 +182,9 @@ This produces an eval schema with defaults:
 }
 ```
 
-`add_default_xeval()` removes the `required` array from the resolved schema and instead annotates each optional field
-with `x-eval-required: false`. Required fields (the default) carry no annotation.
+`add_default_xeval()` removes the `required` array from the resolved schema (the eval schema doesn't use it -- scoring depends on what gold contains, not on required flags).
 
-Default comparators are assigned by type (see [`_default_comparator`](src/struct_extract_eval/xeval.py#L46) for the
+Default comparators are assigned by type (see [`_default_comparator`](src/struct_extract_eval/core/xeval.py#L46) for the
 exact rules):
 
 | Field type               | Default comparator |
@@ -221,7 +222,6 @@ Open `eval_schema.json` and adjust. This is where you make the evaluation fit yo
     },
     "lab_id": {
       "type": "string",
-      "x-eval-required": false,
       "x-eval-compare": "exact"
     }
   }
@@ -233,14 +233,26 @@ What changed:
 - `method` added `lowercase` + `strip` transforms for normalization.
 - `temperature` now has a 5% relative tolerance, so 300 vs 315 would still score 1.
 
-### Step 4: Run Evaluation
+### Step 4: Validate
 
 ```python
 import json
-from struct_extract_eval import evaluate
+from struct_extract_eval import parse_eval_schema, validate_gold
 
 with open("eval_schema.json") as f:
     eval_schema = json.load(f)
+
+# Validate the eval schema (raises SchemaError if invalid)
+parse_eval_schema(eval_schema)
+
+# Validate gold against the schema (warns about missing/extra fields)
+validate_gold(gold, eval_schema)
+```
+
+### Step 5: Run Evaluation
+
+```python
+from struct_extract_eval import evaluate
 
 result = evaluate(
     gold=gold,
@@ -280,7 +292,6 @@ container nodes (objects, arrays) are structural scaffolding. For each leaf, it 
 **Example:** Given this schema and data:
 
 ```
-Schema fields: method (string, exact), temperature (number, numeric), lab_id (string, x-eval-required: false)
 
 Gold:      {"method": "PVD", "temperature": 300, "lab_id": "A1"}
 Extracted: {"method": "PVD", "temperature": 305}
@@ -292,35 +303,23 @@ Extracted: {"method": "PVD", "temperature": 305}
 | `temperature` | `300`   | `305`       | depends on tolerance | 0 / 1 |
 | `lab_id`      | `"A1"`  | *(missing)* | omission             | 0.0   |
 
-Result: 3 fields scored. `lab_id` is in gold, so the extractor is expected to produce it -- its `x-eval-required: false`
-flag does not matter for scoring.
+Result: 3 fields scored. `lab_id` is in gold, so the extractor is expected to produce it.
 
 **Key details:**
 
-- **`x-eval-required` is a constraint on gold, not on scoring.** The flag tells you whether it is acceptable for gold
-  to omit a field. `x-eval-required: true` (the default) means gold MUST have this field -- if gold is missing it,
-  that's a data quality error. `x-eval-required: false` means gold MAY be missing this field -- it is structurally
-  absent in some records, and that's fine. Once a field is present in gold, the extractor is expected to produce it.
-  Once a field is absent in gold, the extractor is expected to not produce it. The scoring path does not branch on
-  `x-eval-required` at all -- it simply compares whatever gold has against whatever extracted has. The only place
-  `x-eval-required` matters is gold validation, before scoring begins: an `x-eval-required: true` field missing from
-  gold is flagged as a data quality error; an `x-eval-required: false` field missing from gold is silently accepted.
-- **`null` is a value, not absence.** A key present with value `null` is different from a missing key. `null` vs
-  `"alice"` is a mismatch (score 0). `null` vs `null` is a match (score 1).
-- **`x-eval-required` is not inherited.** A parent's `x-eval-required` does not affect its children, and children's
-  flags do not leak upward. Three cases:
-  - **Parent absent in both gold and extracted:** 0 fields counted. Children are never reached.
+- **Scoring depends on what gold contains.** If gold has a field, the extractor is expected to
+  produce it. If gold doesn't have a field, the extractor is expected to not produce it.
+- **`null` is a value, not absence.** A key present with value `null` is different from a
+  missing key. `null` vs `"alice"` is a mismatch (score 0). `null` vs `null` is a match
+  (score 1).
+- **Parent/child scoring.** Three cases:
+  - **Parent absent in both gold and extracted:** 0 fields counted.
   - **Parent in gold, missing from extracted:** every leaf descendant becomes an omission.
-  - **Parent present in both:** children are evaluated normally using their own `x-eval-required` flags for gold
-    validation only -- scoring depends on what gold contains.
+  - **Parent present in both:** children are evaluated normally.
 - **`x-eval-skip: true` means excluded from metrics.** The field is excluded from all metric calculations -- no value
   comparison, no presence check, no contribution to precision, recall, F1, or `total_fields`. Skip fields still appear
   in the results (with status `"skipped"`) for visibility and debugging, but they are filtered out when calculating
   scores. If you want presence checking, don't mark it skip -- use a real comparator.
-  `x-eval-skip` is orthogonal to both `x-eval-compare` and `x-eval-required`:
-  - **`required: true` + `skip: true`** -- gold MUST have this field (`validate_gold()` checks), but scoring ignores it.
-    Useful for fields like "description" that every record should have, but whose value can't be judged.
-  - **`required: false` + `skip: true`** -- gold MAY omit this field, and scoring ignores it either way.
   - A field can declare both `x-eval-skip: true` and `x-eval-compare: "semantic"` -- the comparator documents what kind
     of field it is. Toggling skip on/off doesn't lose the comparator config. When skip is `true`, the comparator is
     ignored.
@@ -467,7 +466,6 @@ All evaluation config lives in the JSON schema. No separate config file.
 
 | Key                         | Purpose                                                             | Default            | Example                                                   |
 |-----------------------------|---------------------------------------------------------------------|--------------------|-----------------------------------------------------------|
-| `x-eval-required`           | Gold validation: is it OK for gold to omit this field?              | `true`             | `false`                                                   |
 | `x-eval-compare`            | Which comparator to use                                             | inferred from type | `"semantic"`, `{"numeric": {"tolerance": {"rel": 0.01}}}` |
 | `x-eval-skip`              | Make field fully invisible to scoring                               | `false`            | `true`                                                    |
 | `x-eval-transform`          | Preprocessing chain (both sides)                                    | none               | `["lowercase", "strip"]`                                  |
@@ -532,12 +530,30 @@ with.
 | Function                                       | Purpose                                                          |
 |------------------------------------------------|------------------------------------------------------------------|
 | `infer_schema(instances)`                      | Infer resolved schema from gold instances                        |
-| `add_default_xeval(schema)`                    | Annotate a resolved schema with `x-eval-*` defaults (in-place)   |
-| `generate_eval_schema(gold?, schema?)`          | Generate eval schema (resolved + `x-eval-*` defaults) for review |
+| `annotate_xeval(schema)`                       | Annotate a resolved schema with `x-eval-*` defaults (in-place)   |
+| `set_type_default(json_type, comparator)`      | Change the default comparator for a JSON type                    |
+| `reset_type_defaults()`                        | Reset type-defaults mapping to built-in defaults                 |
+| `parse_eval_schema(schema)`                         | Parse and validate eval schema, returns SchemaNode tree          |
+| `validate_gold(gold, schema, ...)`             | Validate gold data against schema (type errors, missing/extra warnings) |
 | `evaluate(gold, extracted, schema, id_field?)` | Evaluate gold vs extracted using a reviewed eval schema          |
-| `parse_schema(schema)`                         | Parse an eval schema into the internal tree representation       |
 
-`evaluate()` requires an eval schema -- you must generate and review it before calling.
+`evaluate()` requires an eval schema -- you must annotate and review it before calling.
+
+### Validation
+
+Two separate steps, run before `evaluate()`:
+
+```python
+from struct_extract_eval import parse_eval_schema, validate_gold
+
+# 1. Parse and validate the eval schema (types, comparator names, x-eval-* syntax)
+parse_eval_schema(eval_schema)  # raises SchemaError if invalid
+
+# 2. Check gold data against the schema
+validate_gold(gold, eval_schema)                        # type errors + all warnings
+validate_gold(gold, eval_schema, warn_missing=False)    # suppress missing-field warnings
+validate_gold(gold, eval_schema, warn_extra=False)      # suppress extra-field warnings
+```
 
 ---
 
@@ -548,7 +564,6 @@ with.
 | **Instance**                                | A JSON object with actual data values. Both gold (ground truth) and extracted (LLM output) are instances.                                                                                                                                                                                                                                                                                             |
 | [**JSON Schema**](https://json-schema.org/) | A standard JSON Schema (`type`, `properties`, `required`, etc.) with no eval-specific extensions.                                                                                                                                                                                                                                                                                                     |
 | **Resolved schema**                         | A schema containing only `type`, `properties`, `items`, and `required`. No composition or conditional keywords (`$ref`, `allOf`, `anyOf`, `oneOf`, `if/then/else`). No constraint keywords (`minLength`, `format`, etc.). No `x-eval-*`. This is the clean structural input the package accepts.                                                                                                      |
-| **Eval schema**                             | A resolved schema annotated with `x-eval-*` extension keys. Contains only `type`, `properties`, `items`, `x-eval-required` (only annotated when `false`; `true` is default), `x-eval-compare`, and `x-eval-transform`. Produced by running `add_default_xeval()` on a resolved schema. Canonical source of truth for evaluation structure and config. |
 | **SchemaNode tree**                         | Internal parsed representation of an eval schema. All downstream code works with `SchemaNode`, never raw dicts.                                                                                                                                                                                                                                                                                       |
 
 ---

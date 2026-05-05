@@ -1,9 +1,9 @@
 """Batch comparator dispatch.
 
-After ``score_record`` finishes, some FieldResults may have ``pending_batch``
-set (provisional placeholders for fields that use a BatchComparator).
-``process_batches`` finds these, groups them by comparator name, looks up the
-registered handler, and calls it once per group with the full list of items.
+After ``score_record`` finishes, some FieldResults have ``status="pending"``
+(provisional placeholders for fields that use a BatchComparator).
+``process_batches`` finds these, groups them by ``comparator`` name, looks up
+the registered handler, and calls it once per group with the full list of items.
 
 Comparator params (from ``x-eval-compare`` in the schema) are read from the
 schema tree -- NOT stored on FieldResult. This keeps FieldResult a pure result
@@ -27,6 +27,7 @@ Batch errors are EXCLUDED from precision/recall/F1, like skipped fields.
 """
 
 import logging
+import re
 
 from struct_extract_eval.core.comparators.comparator import (
     BatchItem,
@@ -34,9 +35,18 @@ from struct_extract_eval.core.comparators.comparator import (
 )
 from struct_extract_eval.core.comparators.registry import get_comparator, is_batch
 from struct_extract_eval.core.schema import SchemaNode
-from struct_extract_eval.core.scoring import FieldResult
+from struct_extract_eval.core.field_result import FieldResult
 
 logger = logging.getLogger(__name__)
+
+
+def _to_schema_path(path: str) -> str:
+    """Normalize an instance path back to a schema path for path_map lookup.
+
+    ``"students[0].surname"`` -> ``"students[].surname"``
+    ``"layers[2].steps[-1].name"`` -> ``"layers[].steps[].name"``
+    """
+    return re.sub(r"\[-?\d+\]", "[]", path)
 
 
 def _build_path_map(tree: SchemaNode) -> dict[str, SchemaNode]:
@@ -64,17 +74,17 @@ def process_batches(
     """Find pending batch fields, group by comparator name, dispatch to handlers.
 
     Mutates ``field_results`` in place AND returns it (for chaining). After this
-    runs, no FieldResult should still have ``pending_batch`` set.
+    runs, no FieldResult should still have ``status="pending"``.
 
     The ``tree`` parameter provides access to comparator params (from
     ``x-eval-compare`` in the schema) so they can be passed through to
     ``BatchItem.params`` without storing config on FieldResult.
     """
-    # Group by pending_batch label, preserving original order within each group
+    # Group pending fields by comparator name, preserving order within each group
     groups: dict[str, list[FieldResult]] = {}
     for r in field_results:
-        if r.pending_batch:
-            groups.setdefault(r.pending_batch, []).append(r)
+        if r.status == "pending":
+            groups.setdefault(r.comparator, []).append(r)
 
     if not groups:
         return field_results
@@ -103,17 +113,18 @@ def process_batches(
             _mark_all_error(results)
             continue
 
-        items = [
-            BatchItem(
+        items = []
+        for r in results:
+            schema_path = _to_schema_path(r.path)
+            node = path_map.get(schema_path)
+            items.append(BatchItem(
                 path=r.path,
                 gold_raw=r.gold_value,
                 extracted_raw=r.extracted_value,
                 gold_compared=r.gold_compared,
                 extracted_compared=r.extracted_compared,
-                params=path_map[r.path].comparator.params if r.path in path_map else {},
-            )
-            for r in results
-        ]
+                params=node.comparator.params if node else {},
+            ))
 
         try:
             outputs = fn(items)
@@ -158,13 +169,11 @@ def process_batches(
             if i >= len(outputs):
                 # Short list: trailing items get batch_error
                 r.status = "batch_error"
-                r.pending_batch = None
                 continue
             out = outputs[i]
             if out is None:
                 # Per-item failure -- explicit None signals "couldn't decide"
                 r.status = "batch_error"
-                r.pending_batch = None
                 continue
             if not isinstance(out, ComparatorResult):
                 logger.error(
@@ -173,18 +182,19 @@ def process_batches(
                     name, type(out).__name__, i, r.path,
                 )
                 r.status = "batch_error"
-                r.pending_batch = None
                 continue
-            r.score = out.score
             r.reason = out.reason
-            r.status = "match" if out.score >= 1.0 else "mismatch"
-            r.pending_batch = None
+            if out.skip:
+                r.score = 0.0
+                r.status = "skipped"
+            else:
+                r.score = out.score
+                r.status = "match" if out.score >= 1.0 else "mismatch"
 
     return field_results
 
 
 def _mark_all_error(results: list[FieldResult]) -> None:
-    """Mark every FieldResult as batch_error and clear pending_batch."""
+    """Mark every FieldResult as batch_error."""
     for r in results:
         r.status = "batch_error"
-        r.pending_batch = None

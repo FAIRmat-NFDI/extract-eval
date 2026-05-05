@@ -1,55 +1,77 @@
 """Content scoring: walk SchemaNode tree with gold + extracted, produce per-field scores.
 
-Supports flat objects, nested objects, and ordered arrays.
-Unordered array alignment (Hungarian/key-field) is not yet implemented.
+Supports flat objects, nested objects, and arrays (ordered and unordered).
+Array alignment strategies are controlled by ``x-eval-align`` on the array
+node. Default is ordered (positional). Key-field alignment matches elements
+by a unique identifier field. Hungarian bipartite matching is planned.
 """
 
 import logging
-from dataclasses import dataclass
-from typing import Literal
 
+from struct_extract_eval.batch.process import process_batches
 from struct_extract_eval.core.comparators.registry import get_comparator, is_batch
+from struct_extract_eval.core.field_result import FieldResult, FieldStatus
 from struct_extract_eval.core.schema import SchemaNode
 from struct_extract_eval.core.transforms.registry import get_transform
 from struct_extract_eval.core.transforms.transform import TransformSpec
 
 logger = logging.getLogger(__name__)
 
-FieldStatus = Literal[
-    "match", "mismatch", "omission", "hallucination", "skipped",
-    "pending", "batch_error",
-]
 
+def _coerce_to_list(value: object, path: str) -> tuple[list[object], bool]:
+    """Coerce a value to a list for array scoring.
 
-@dataclass
-class FieldResult:
-    """Result of comparing a single field between gold and extracted.
+    Returns ``(list, is_valid)`` where ``is_valid`` is True only if the
+    value was a real list. False means the value was coerced (None or wrong
+    type) and the caller should not treat results as reliable.
 
-    ``pending_batch`` is set when the field's comparator is a BatchComparator.
-    The scoring layer leaves these with ``status="pending"`` and ``score=0.0``.
-    A later pass via ``process_batches`` dispatches them to the registered
-    batch handler and updates score/status/reason/pending_batch in place.
+    Does not log — callers handle the is_valid=False case themselves
+    (typically by returning a skipped FieldResult with a reason).
 
-    ``gold_compared`` and ``extracted_compared`` are the values the comparator
-    actually saw, after transforms were applied. When there are no transforms,
-    they reference the same objects as ``gold_value`` and ``extracted_value``.
-    These are used by batch handlers so the LLM/embedding/etc. sees the
-    normalized values, not the raw ones.
-
-    ``reason`` carries a short human-readable explanation, propagated from
-    ``ComparatorResult.reason`` (per-field) or set by the batch handler.
+    - list: returned as-is, is_valid=True
+    - None: treated as [], is_valid=False
+    - anything else: treated as [], is_valid=False
     """
+    if isinstance(value, list):
+        return value, True
+    if value is None:
+        return [], False
+    return [], False
 
-    path: str
-    score: float
-    comparator: str
-    gold_value: object
-    extracted_value: object
-    status: FieldStatus
-    reason: str | None = None
-    gold_compared: object | None = None
-    extracted_compared: object | None = None
-    pending_batch: str | None = None
+
+def _rewrite_element_paths(
+    results: list["FieldResult"],
+    items_path: str,
+    element_index: int,
+) -> None:
+    """Rewrite schema paths to instance paths for array element results.
+
+    ``items_path`` is the items node's schema path (e.g. ``"steps[]"`` or
+    ``"layers[].steps[]"``). This function replaces the LAST ``[]`` in that
+    prefix with the element index, then applies the same replacement to every
+    FieldResult path that starts with the prefix.
+
+    Examples (items_path -> what happens to FieldResult.path):
+
+    - items_path=``"steps[]"``, index=0:
+      ``"steps[]"``      -> ``"steps[0]"``
+      ``"steps[].name"`` -> ``"steps[0].name"``
+
+    - items_path=``"layers[].steps[]"``, index=1:
+      ``"layers[].steps[]"``      -> ``"layers[].steps[1]"``
+      ``"layers[].steps[].name"`` -> ``"layers[].steps[1].name"``
+      (the parent ``layers[]`` is left for the outer array scorer to resolve)
+    """
+    last_bracket = items_path.rfind("[]")
+    if last_bracket == -1:
+        return  # no [] in path — nothing to rewrite
+    instance_path = (
+        items_path[:last_bracket] + f"[{element_index}]" + items_path[last_bracket + 2:]
+    )
+    prefix_len = len(items_path)
+    for r in results:
+        r.path = instance_path + r.path[prefix_len:]
+
 
 
 def score_record(
@@ -76,7 +98,7 @@ def _score_node(
     if node.json_type == "object" and node.children:
         return _score_object(node, gold_value, extracted_value)
     if node.json_type == "array" and node.children:
-        return _score_array_ordered(node, gold_value, extracted_value)
+        return _score_array(node, gold_value, extracted_value)
     return [_score_leaf(node, gold_value, extracted_value)]
 
 
@@ -128,7 +150,55 @@ def _score_object(
         elif extracted_has and not gold_has:
             results.extend(_hallucination_results(child, extracted_dict[field_name]))
 
+    # Extra keys in extracted that are not in the schema -> hallucinations, regardless if gold has these keys.
+    # One hallucination per extra key (no recursion into nested values).
+    schema_fields = {
+        child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
+        for child in node.children
+    }
+    for key in sorted(extracted_dict):
+        if key not in schema_fields:
+            path = f"{node.path}.{key}" if node.path else key
+            results.append(FieldResult(
+                path=path,
+                score=0.0,
+                comparator="",
+                gold_value=None,
+                extracted_value=extracted_dict[key],
+                status="hallucination",
+            ))
+
     return results
+
+
+def _score_array(
+    node: SchemaNode,
+    gold_value: object,
+    extracted_value: object,
+) -> list[FieldResult]:
+    """Dispatch to the appropriate array scoring strategy based on node.align.
+
+    Supports ordered (positional) and unordered matching. For unordered,
+    key-field alignment matches elements by a unique identifier field.
+    Hungarian bipartite matching finds the optimal pairing by maximizing
+    total F1 across all pairs.
+    """
+    align = node.align
+    if align is None or align.get("ordered") is True:
+        return _score_array_ordered(node, gold_value, extracted_value)
+    match_by = align.get("match_by")
+    if match_by == "key_field":
+        return _score_array_matched_by_key_field(
+            node, gold_value, extracted_value, key=str(align["key"])
+        )
+    if match_by == "hungarian":
+        return _score_array_hungarian(node, gold_value, extracted_value)
+    logger.warning(
+        "Unknown x-eval-align match_by='%s' at '%s'. "
+        "Falling back to ordered matching.",
+        match_by, node.path,
+    )
+    return _score_array_ordered(node, gold_value, extracted_value)
 
 
 def _score_array_ordered(
@@ -137,26 +207,29 @@ def _score_array_ordered(
     extracted_value: object,
 ) -> list[FieldResult]:
     """Score an array node using ordered (positional) matching."""
-    results: list[FieldResult] = []
-    gold_is_list = isinstance(gold_value, list)
-    extracted_is_list = isinstance(extracted_value, list)
-    if not gold_is_list:
-        logger.warning(
-            "Expected list at '%s', got %s in gold", node.path, type(gold_value).__name__
-        )
-    if not extracted_is_list:
-        logger.warning(
-            "Expected list at '%s', got %s in extracted", node.path, type(extracted_value).__name__
-        )
-    gold_list = gold_value if gold_is_list else []
-    extracted_list = extracted_value if extracted_is_list else []
-    items_node = node.children[0]  # arrays have exactly one child: the items schema
+    gold_list, gold_valid = _coerce_to_list(gold_value, node.path)
+    extracted_list, extracted_valid = _coerce_to_list(extracted_value, node.path)
+    items_node = node.children[0]
 
-    # Both sides are actual empty lists: the array itself is a match. This is
-    # the only case where the array container node contributes a "match"
-    # FieldResult directly. Coerced empties (from non-list values) do NOT
-    # qualify -- see the next branch.
-    if gold_is_list and extracted_is_list and len(gold_list) == 0 and len(extracted_list) == 0:
+    # If either side was coerced, skip scoring entirely.
+    if not gold_valid or not extracted_valid:
+        reason = (
+            f"invalid gold type ({type(gold_value).__name__})"
+            if not gold_valid
+            else f"invalid extracted type ({type(extracted_value).__name__})"
+        )
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="skipped",
+            reason=reason,
+        )]
+
+    # Both empty lists: array-level match
+    if len(gold_list) == 0 and len(extracted_list) == 0:
         return [FieldResult(
             path=node.path,
             score=1.0,
@@ -166,32 +239,342 @@ def _score_array_ordered(
             status="match",
         )]
 
-    # Structural failure: at least one side is not a list, and after coercion
-    # there are no elements to per-element score. Emit one mismatch for the
-    # array node so both precision and recall are penalized.
-    both_empty = len(gold_list) == 0 and len(extracted_list) == 0
-    if (not gold_is_list or not extracted_is_list) and both_empty:
+    results: list[FieldResult] = []
+
+    # Matched pairs: compare element by element
+    matched_count = min(len(gold_list), len(extracted_list))
+    for i in range(matched_count):
+        element_results = _score_node(items_node, gold_list[i], extracted_list[i])
+        _rewrite_element_paths(element_results, items_node.path, i)
+        results.extend(element_results)
+
+    # Extra gold elements: omissions
+    for i in range(matched_count, len(gold_list)):
+        element_results = _omission_results(items_node, gold_list[i])
+        _rewrite_element_paths(element_results, items_node.path, i)
+        results.extend(element_results)
+
+    # Extra extracted elements: hallucinations
+    # Index -1: these elements have no gold counterpart.
+    for i in range(matched_count, len(extracted_list)):
+        element_results = _hallucination_results(items_node, extracted_list[i])
+        _rewrite_element_paths(element_results, items_node.path, -1)
+        results.extend(element_results)
+
+    return results
+
+
+# Maximum number of (gold, extracted) pairs to score for Hungarian matching.
+# Beyond this, the O(n*m*fields) cost matrix computation is too expensive.
+_MAX_HUNGARIAN_PAIRS = 2500  # 50 x 50
+
+
+def _score_array_hungarian(
+    node: SchemaNode,
+    gold_value: object,
+    extracted_value: object,
+) -> list[FieldResult]:
+    """Score an array using Hungarian (bipartite) matching.
+
+    Finds the optimal pairing of gold and extracted elements that
+    maximizes total F1 across all pairs. Uses
+    ``scipy.optimize.linear_sum_assignment`` on a cost matrix built
+    by scoring every (gold_i, extracted_j) pair.
+
+    For primitives, each pair has one field, so F1 equals the
+    comparator score. For objects, F1 aggregates across multiple fields.
+
+    Falls back to ordered matching with a warning if the number of
+    pairs exceeds ``_MAX_HUNGARIAN_PAIRS``.
+    """
+    from struct_extract_eval.core.record import build_record_result
+
+    gold_list, gold_valid = _coerce_to_list(gold_value, node.path)
+    extracted_list, extracted_valid = _coerce_to_list(extracted_value, node.path)
+    items_node = node.children[0]
+
+    # If either side was coerced (not a real list), skip scoring entirely.
+    # Return a skipped result so the invalid data doesn't produce misleading scores.
+    if not gold_valid or not extracted_valid:
+        reason = (
+            f"invalid gold type ({type(gold_value).__name__})"
+            if not gold_valid
+            else f"invalid extracted type ({type(extracted_value).__name__})"
+        )
         return [FieldResult(
             path=node.path,
             score=0.0,
             comparator="",
             gold_value=gold_value,
             extracted_value=extracted_value,
-            status="mismatch",
+            status="skipped",
+            reason=reason,
         )]
 
-    # Matched pairs: compare element by element
-    matched_count = min(len(gold_list), len(extracted_list))
-    for i in range(matched_count):
-        results.extend(_score_node(items_node, gold_list[i], extracted_list[i]))
+    # Both actual empty lists: array-level match
+    if len(gold_list) == 0 and len(extracted_list) == 0:
+        return [FieldResult(
+            path=node.path,
+            score=1.0,
+            comparator="",
+            gold_value=[],
+            extracted_value=[],
+            status="match",
+        )]
 
-    # Extra gold elements: omissions
-    for i in range(matched_count, len(gold_list)):
-        results.extend(_omission_results(items_node, gold_list[i]))
+    results: list[FieldResult] = []
+    n = len(gold_list)
+    m = len(extracted_list)
 
-    # Extra extracted elements: hallucinations
-    for i in range(matched_count, len(extracted_list)):
-        results.extend(_hallucination_results(items_node, extracted_list[i]))
+    # Size guard: fall back to ordered for very large arrays
+    if n * m > _MAX_HUNGARIAN_PAIRS:
+        logger.warning(
+            "Array at '%s' has %d x %d = %d pairs, exceeding "
+            "Hungarian threshold (%d)",
+            node.path, n, m, n * m, _MAX_HUNGARIAN_PAIRS,
+        )
+        return _score_array_ordered(node, gold_value, extracted_value)
+
+    # One side empty: no matching needed, just omissions/hallucinations
+    if n == 0:
+        for idx, elem in enumerate(extracted_list):
+            element_results = _hallucination_results(items_node, elem)
+            _rewrite_element_paths(element_results, items_node.path, -1)
+            results.extend(element_results)
+        return results
+    if m == 0:
+        for idx, elem in enumerate(gold_list):
+            element_results = _omission_results(items_node, elem)
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
+        return results
+
+    # score ALL n*m pairs, build cost matrix and results cache
+    try:
+        import numpy as np
+        from scipy.optimize import linear_sum_assignment
+    except ImportError as exc:
+        raise ImportError(
+            "Hungarian matching requires numpy and scipy. "
+            "Install with: pip install numpy scipy"
+        ) from exc
+
+    score_matrix = np.zeros((n, m))
+    # an array element gets a list of FieldResults
+    results_matrix: list[list[list[FieldResult]]] = [
+        [[] for _ in range(m)] for _ in range(n)
+    ]
+
+    has_pending = False
+    for i, g in enumerate(gold_list):
+        for j, e in enumerate(extracted_list):
+            pair_results = _score_node(items_node, g, e)
+            results_matrix[i][j] = pair_results
+            if not has_pending and any(r.status == "pending" for r in pair_results):
+                has_pending = True
+
+    # Resolve batch comparators before computing the cost matrix.
+    # This makes n*m batch calls -- the user opted into this by combining
+    # batch comparators with Hungarian matching.
+    if has_pending:
+        logger.warning(
+            "Array at '%s' uses Hungarian matching with batch comparators. "
+            "Resolving %d x %d = %d pairs via batch comparator. "
+            "Consider switching to key-field alignment "
+            "(x-eval-align: {match_by: 'key_field', key: ...}) or adding "
+            "deterministic/scorable fields to reduce ambiguity and cost.",
+            node.path, n, m, n * m,
+        )
+        for i in range(n):
+            for j in range(m):
+                process_batches(results_matrix[i][j], items_node)
+
+    # Build cost matrix from F1 scores.
+    # Note: post-processors (e.g. reclassify_nulls) are NOT applied here --
+    # they run after scoring in evaluate(). See array.md for details.
+    for i in range(n):
+        for j in range(m):
+            record = build_record_result(0, results_matrix[i][j], {}, {})
+            score_matrix[i][j] = record.f1
+
+    # Hungarian finds optimal matching (maximize total F1)
+    row_ind, col_ind = linear_sum_assignment(score_matrix, maximize=True)
+
+    matched_gold: set[int] = set()
+    matched_ext: set[int] = set()
+    for i, j in zip(row_ind, col_ind):
+        # Only count as matched if the pair has a positive score.
+        # A pair with F1=0 means no fields matched — treat as
+        # unmatched (omission + hallucination) rather than a bad match.
+        if score_matrix[i][j] > 0:
+            matched_gold.add(i)
+            matched_ext.add(j)
+            element_results = results_matrix[i][j]
+            _rewrite_element_paths(element_results, items_node.path, i)
+            results.extend(element_results)
+        # else: leave both unmatched
+
+    # Unmatched gold -> omissions
+    for i in range(n):
+        if i not in matched_gold:
+            element_results = _omission_results(items_node, gold_list[i])
+            _rewrite_element_paths(element_results, items_node.path, i)
+            results.extend(element_results)
+
+    # Unmatched extracted -> hallucinations
+    for j in range(m):
+        if j not in matched_ext:
+            element_results = _hallucination_results(items_node, extracted_list[j])
+            _rewrite_element_paths(element_results, items_node.path, -1)
+            results.extend(element_results)
+
+    return results
+
+
+def _score_array_matched_by_key_field(
+    node: SchemaNode,
+    gold_value: object,
+    extracted_value: object,
+    key: str,
+) -> list[FieldResult]:
+    """Score an array using key-field alignment.
+
+    Matches gold and extracted elements by the value of a shared key field
+    (e.g. "name"). Order doesn't matter. Elements with the same key value
+    are paired and scored recursively. Unmatched gold elements produce
+    omissions; unmatched extracted elements produce hallucinations.
+    """
+    gold_list, gold_valid = _coerce_to_list(gold_value, node.path)
+    extracted_list, extracted_valid = _coerce_to_list(extracted_value, node.path)
+    items_node = node.children[0]
+
+    # If either side was coerced, skip scoring entirely.
+    if not gold_valid or not extracted_valid:
+        reason = (
+            f"invalid gold type ({type(gold_value).__name__})"
+            if not gold_valid
+            else f"invalid extracted type ({type(extracted_value).__name__})"
+        )
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="skipped",
+            reason=reason,
+        )]
+
+    results: list[FieldResult] = []
+
+    # Both empty lists: array-level match
+    if len(gold_list) == 0 and len(extracted_list) == 0:
+        return [FieldResult(
+            path=node.path,
+            score=1.0,
+            comparator="",
+            gold_value=[],
+            extracted_value=[],
+            status="match",
+        )]
+
+    # Build lookup: key_value -> first element for extracted.
+    # Duplicate keys in extracted: first occurrence wins the match,
+    # subsequent duplicates are treated as unmatched (hallucinations).
+    extracted_by_key: dict[str | int | float, object] = {}
+    extracted_unmatched: list[object] = []
+    for elem in extracted_list:
+        if not isinstance(elem, dict) or key not in elem:
+            extracted_unmatched.append(elem)
+            continue
+        k = elem[key]
+        if isinstance(k, bool) or not isinstance(k, (str, int, float)):
+            # Unhashable, non-primitive, or bool key value — can't match.
+            # bool is excluded because True == 1 and False == 0 in Python,
+            # which causes silent key collisions in the lookup dict.
+            logger.warning(
+                "Key field '%s' at '%s' has non-matchable value %r (%s). "
+                "Element treated as unmatched.",
+                key, node.path, k, type(k).__name__,
+            )
+            extracted_unmatched.append(elem)
+            continue
+        if k in extracted_by_key:
+            # Duplicate key — first wins, rest are unmatched
+            logger.warning(
+                "Duplicate key '%s'=%r in extracted at '%s'. "
+                "Only the first occurrence is matched.",
+                key, k, node.path,
+            )
+            extracted_unmatched.append(elem)
+            continue
+        extracted_by_key[k] = elem
+
+    matched_keys: set[str | int | float] = set()
+
+    # Match gold elements against extracted by key
+    for idx, gold_elem in enumerate(gold_list):
+
+        # todo rethink if the gold missing the key, what to do ?
+        if not isinstance(gold_elem, dict) or key not in gold_elem:
+            # Gold element missing the key field — omission
+            element_results = _omission_results(items_node, gold_elem)
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
+            continue
+
+        k = gold_elem[key]
+        if isinstance(k, bool) or not isinstance(k, (str, int, float)):
+            logger.warning(
+                "Key field '%s' at '%s' has non-matchable value %r (%s) "
+                "in gold. Element treated as unmatched.",
+                key, node.path, k, type(k).__name__,
+            )
+            # todo rethink when key is not hashable, what todo ?
+            element_results = _omission_results(items_node, gold_elem)
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
+            continue
+        if k in matched_keys:
+            # Duplicate key in gold — first already consumed the match
+            logger.warning(
+                "Duplicate key '%s'=%r in gold at '%s'. "
+                "Only the first occurrence is matched.",
+                key, k, node.path,
+            )
+
+            # todo rethink when key not unique, what to do ?
+            element_results = _omission_results(items_node, gold_elem)
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
+        elif k in extracted_by_key:
+            # Matched pair: score recursively
+            matched_keys.add(k)
+            element_results = _score_node(
+                items_node, gold_elem, extracted_by_key[k]
+            )
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
+        else:
+            # No match in extracted — omission
+            element_results = _omission_results(items_node, gold_elem)
+            _rewrite_element_paths(element_results, items_node.path, idx)
+            results.extend(element_results)
+
+    # Unmatched extracted elements (key not in gold) — hallucinations
+    # Index -1: these elements have no gold counterpart.
+    for k, elem in extracted_by_key.items():
+        if k not in matched_keys:
+            element_results = _hallucination_results(items_node, elem)
+            _rewrite_element_paths(element_results, items_node.path, -1)
+            results.extend(element_results)
+
+    # Extracted elements without the key field or with
+    # unhashable/duplicate keys — hallucinations
+    for elem in extracted_unmatched:
+        element_results = _hallucination_results(items_node, elem)
+        _rewrite_element_paths(element_results, items_node.path, -1)
+        results.extend(element_results)
 
     return results
 
@@ -225,6 +608,7 @@ def _score_leaf(
     if is_batch(comparator_fn):
         # Defer: build a provisional FieldResult, mark pending. process_batches
         # will dispatch this to the registered batch handler later.
+        # The comparator name identifies which batch handler to use.
         return FieldResult(
             path=node.path,
             score=0.0,
@@ -234,7 +618,6 @@ def _score_leaf(
             status="pending",
             gold_compared=gold_transformed,
             extracted_compared=extracted_transformed,
-            pending_batch=node.comparator.name,
         )
 
     # Per-field comparator: call inline
@@ -266,10 +649,11 @@ def _apply_transforms(value: object, transforms: list[TransformSpec]) -> object:
 
 
 def _omission_results(node: SchemaNode, gold_value: object = None) -> list[FieldResult]:
-    """Generate omission FieldResults for all leaves under a missing node.
+    """Generate omission FieldResults for leaves under a missing node.
 
     Can be called on any node, not just leaves. For object nodes, recurses
-    into all children so every leaf in the subtree is marked as an omission.
+    only into children that are actually PRESENT in the gold dict -- you
+    can't omit a field that gold didn't have.
     For array nodes, emits one omission per gold element; if the gold array
     is empty (or a non-list coerced to empty) while extracted is missing the
     field entirely, emits a single omission for the array node itself.
@@ -279,14 +663,16 @@ def _omission_results(node: SchemaNode, gold_value: object = None) -> list[Field
     if node.json_type == "object" and node.children:
         if gold_value is not None and not isinstance(gold_value, dict):
             logger.warning(
-                "Expected dict at '%s', got %s in gold", node.path, type(gold_value).__name__
+                "Expected dict at '%s', got %s in gold",
+                node.path, type(gold_value).__name__,
             )
         gold_dict = gold_value if isinstance(gold_value, dict) else {}
         results: list[FieldResult] = []
         for child in node.children:
             field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
-            child_gold = gold_dict.get(field_name)
-            results.extend(_omission_results(child, child_gold))
+            if field_name not in gold_dict:
+                continue  # can't omit what gold didn't have
+            results.extend(_omission_results(child, gold_dict[field_name]))
         return results
     if node.json_type == "array" and node.children:
         if gold_value is not None and not isinstance(gold_value, list):
@@ -325,7 +711,8 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
     """Generate hallucination FieldResults for extra extracted elements.
 
     Can be called on any node, not just leaves. For object nodes, recurses
-    into all children so every leaf in the subtree is marked as a hallucination.
+    only into children that are actually PRESENT in the extracted dict --
+    you can't hallucinate a field the extractor didn't produce.
     For array nodes, emits one hallucination per extracted element; if the
     extracted array is empty (or a non-list coerced to empty) while gold is
     missing the field entirely, emits a single hallucination for the array
@@ -344,8 +731,10 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
         extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
         for child in node.children:
             field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
-            child_value = extracted_dict.get(field_name)
-            results.extend(_hallucination_results(child, child_value))
+            if field_name not in extracted_dict:
+                # Can't hallucinate what wasn't produced.
+                continue
+            results.extend(_hallucination_results(child, extracted_dict[field_name]))
         return results
     if node.json_type == "array" and node.children:
         if extracted_value is not None and not isinstance(extracted_value, list):

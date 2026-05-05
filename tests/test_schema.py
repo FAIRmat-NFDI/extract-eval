@@ -7,7 +7,7 @@ from struct_extract_eval.core.schema import (
     SchemaError,
     SchemaNode,
     _validate_xeval,
-    parse_schema,
+    parse_eval_schema,
 )
 from struct_extract_eval.core.transforms.transform import TransformSpec
 
@@ -34,7 +34,6 @@ class TestSchemaNode:
         node = SchemaNode(path="", json_type="object", comparator=ComparatorSpec("exact"))
         assert node.children == []
         assert node.transforms == []
-        assert node.required is True
         assert node.comparator.params == {}
 
 
@@ -47,15 +46,10 @@ class TestSchemaNode:
 class TestValidateXeval:
     def test_valid_config(self) -> None:
         schema: dict[str, object] = {
-            "x-eval-required": False,
             "x-eval-compare": "exact",
             "x-eval-transform": ["lowercase", "strip"],
         }
         _validate_xeval(schema, "test")  # should not raise
-
-    def test_required_not_bool(self) -> None:
-        with pytest.raises(SchemaError, match="x-eval-required must be a boolean"):
-            _validate_xeval({"x-eval-required": "yes"}, "test")
 
     def test_unknown_comparator(self) -> None:
         with pytest.raises(SchemaError, match="Unknown comparator"):
@@ -136,7 +130,7 @@ class TestValidateXeval:
             },
         }
         with pytest.raises(SchemaError, match="params for 'numeric' must be a dict"):
-            parse_schema(schema)
+            parse_eval_schema(schema)
 
     def test_unknown_xeval_key_warns(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.WARNING):
@@ -156,7 +150,7 @@ class TestValidateXeval:
         assert "Unknown x-eval key" in caplog.text
 
 
-# --- parse_schema ---
+# --- parse_eval_schema ---
 
 
 class TestParseSchema:
@@ -168,7 +162,7 @@ class TestParseSchema:
                 "name": {"type": "string", "x-eval-compare": "exact"},
             },
         }
-        root = parse_schema(schema)
+        root = parse_eval_schema(schema)
         assert root.json_type == "object"
         assert root.path == ""
         assert len(root.children) == 1
@@ -176,7 +170,6 @@ class TestParseSchema:
         assert child.path == "name"
         assert child.json_type == "string"
         assert child.comparator.name == "exact"
-        assert child.required is True
         assert child.transforms == []
 
     def test_comparator_string_form(self) -> None:
@@ -188,20 +181,6 @@ class TestParseSchema:
             },
         }
         assert _root_child(schema, "desc").comparator.name == "exact"
-
-    def test_xeval_required_false(self) -> None:
-        schema: dict[str, object] = {
-            "type": "object",
-            "x-eval-compare": "exact",
-            "properties": {
-                "optional": {
-                    "type": "string",
-                    "x-eval-compare": "exact",
-                    "x-eval-required": False,
-                },
-            },
-        }
-        assert _root_child(schema, "optional").required is False
 
     def test_xeval_transform(self) -> None:
         schema: dict[str, object] = {
@@ -275,7 +254,7 @@ class TestParseSchema:
             },
         }
         with pytest.raises(SchemaError, match="missing x-eval-compare"):
-            parse_schema(schema)
+            parse_eval_schema(schema)
 
     def test_nested_objects(self) -> None:
         schema: dict[str, object] = {
@@ -291,7 +270,7 @@ class TestParseSchema:
                 },
             },
         }
-        root = parse_schema(schema)
+        root = parse_eval_schema(schema)
         outer = root.children[0]
         assert outer.path == "outer"
         inner = outer.children[0]
@@ -343,7 +322,7 @@ class TestParseSchema:
 
     def test_missing_type_raises(self) -> None:
         with pytest.raises(SchemaError, match="Missing or invalid 'type'"):
-            parse_schema(
+            parse_eval_schema(
                 {
                     "x-eval-compare": "exact",
                     "properties": {"x": {"type": "string", "x-eval-compare": "exact"}},
@@ -359,11 +338,11 @@ class TestParseSchema:
             },
         }
         with pytest.raises(SchemaError, match="Unknown comparator"):
-            parse_schema(schema)
+            parse_eval_schema(schema)
 
     def test_not_a_dict_raises(self) -> None:
         with pytest.raises(SchemaError, match="Eval schema must be an object"):
-            parse_schema("not a dict")  # type: ignore[arg-type]
+            parse_eval_schema("not a dict")  # type: ignore[arg-type]
 
     def test_unresolved_ref_raises(self) -> None:
         schema: dict[str, object] = {
@@ -374,7 +353,7 @@ class TestParseSchema:
             },
         }
         with pytest.raises(SchemaError, match="Missing or invalid 'type'"):
-            parse_schema(schema)
+            parse_eval_schema(schema)
 
     def test_deeply_nested(self) -> None:
         schema: dict[str, object] = {
@@ -408,7 +387,7 @@ class TestParseSchema:
                 },
             },
         }
-        root = parse_schema(schema)
+        root = parse_eval_schema(schema)
         layers = root.children[0]
         layer_item = layers.children[0]
         steps = next(c for c in layer_item.children if c.path == "layers[].steps")
@@ -418,12 +397,107 @@ class TestParseSchema:
         assert duration.comparator.name == "numeric"
 
 
+# --- x-eval-align key_field validation ---
+
+
+class TestKeyFieldValidation:
+    def test_key_field_not_in_items_properties_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Key not in properties -> warns (schema incomplete, matching may still work on data)."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "key_field", "key": "name"},
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string", "x-eval-compare": "exact"},
+                        },
+                    },
+                },
+            },
+        }
+        with caplog.at_level(logging.WARNING):
+            parse_eval_schema(schema)
+        assert "key 'name' not found" in caplog.text
+
+    def test_key_field_items_missing_raises(self) -> None:
+        """Items missing entirely -> error (can't score array elements at all)."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "key_field", "key": "name"},
+                },
+            },
+        }
+        with pytest.raises(SchemaError, match="requires 'items'"):
+            parse_eval_schema(schema)
+
+    def test_key_field_items_primitive_type_raises(self) -> None:
+        """Items is a primitive type (string) -> error (key_field needs objects)."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "key_field", "key": "name"},
+                    "items": {"type": "string", "x-eval-compare": "exact"},
+                },
+            },
+        }
+        with pytest.raises(SchemaError, match="requires items type 'object'"):
+            parse_eval_schema(schema)
+
+    def test_key_field_items_no_properties_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Opaque object (no properties) -> warns (matching may work, no per-field scoring)."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "key_field", "key": "name"},
+                    "items": {"type": "object", "x-eval-compare": "exact"},
+                },
+            },
+        }
+        with caplog.at_level(logging.WARNING):
+            parse_eval_schema(schema)
+        assert "no 'properties'" in caplog.text
+
+    def test_key_field_valid_passes(self) -> None:
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "x-eval-align": {"match_by": "key_field", "key": "name"},
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "x-eval-compare": "exact"},
+                            "temp": {"type": "number", "x-eval-compare": "numeric"},
+                        },
+                    },
+                },
+            },
+        }
+        root = parse_eval_schema(schema)
+        assert root.children[0].align == {"match_by": "key_field", "key": "name"}
+
+
 # --- Test helpers ---
 
 
 def _root_child(schema: dict[str, object], name: str) -> SchemaNode:
     """Parse schema and return the named child of the root node."""
-    root = parse_schema(schema)
+    root = parse_eval_schema(schema)
     for child in root.children:
         if child.path == name:
             return child

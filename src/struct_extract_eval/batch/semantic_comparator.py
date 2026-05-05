@@ -96,10 +96,31 @@ class SemanticBatchComparator:
                 )
                 scores = []
 
+            if scores and len(scores) < len(pending):
+                logger.warning(
+                    "Semantic judge returned %d scores for %d items "
+                    "(at paths %s). Missing items will be marked as "
+                    "batch_error. The judge may have made mistakes — "
+                    "all returned scores should be treated with caution.",
+                    len(scores),
+                    len(pending),
+                    [p.path for p in pending],
+                )
+            elif len(scores) > len(pending):
+                logger.warning(
+                    "Semantic judge returned %d scores for %d items "
+                    "(at paths %s). Extra scores are discarded. The "
+                    "judge may have made mistakes — all returned "
+                    "scores should be treated with caution.",
+                    len(scores),
+                    len(pending),
+                    [p.path for p in pending],
+                )
+
             for j, idx in enumerate(pending_indices):
                 if j >= len(scores):
                     # Judge returned a short list -- this position stays None
-                    # (already initialized) -> process_batches marks batch_error.
+                    # -> process_batches marks batch_error.
                     continue
                 score = scores[j]
                 if score is None:
