@@ -1,3 +1,10 @@
+import json
+from copy import deepcopy
+from typing import Any
+
+import jsonref
+
+
 def infer_schema(instances: list[object]) -> dict[str, object]:
     """Infer a resolved schema from observed instances.
 
@@ -35,12 +42,11 @@ def infer_schema(instances: list[object]) -> dict[str, object]:
         #   -> flattened_elements = ["a", "b", "c"]
         #   -> items_schema = {"type": "string"}
         flattened_elements: list[object] = [
-            element
-            for array in present_instances
-            if isinstance(array, list)
-            for element in array
+            element for array in present_instances if isinstance(array, list) for element in array
         ]
-        items_schema = infer_schema(flattened_elements) if flattened_elements else {"type": "string"}
+        items_schema = (
+            infer_schema(flattened_elements) if flattened_elements else {"type": "string"}
+        )
         return {"type": "array", "items": items_schema}
     if isinstance(first, dict):
         #   present_instances = [{"name": "A", "value": 1.5},
@@ -78,3 +84,69 @@ def infer_schema(instances: list[object]) -> dict[str, object]:
 
         return {"type": "object", "properties": properties}
     return {"type": "string"}
+
+
+def merge_all_of(schema: dict[str, Any]) -> dict[str, Any]:
+    """
+    Recursively merges 'allOf' lists into a single dictionary.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    if "allOf" in schema:
+        all_of_list = schema.pop("allOf")
+        for subschema in all_of_list:
+            # Recursively merge the subschema first
+            merged_sub = merge_all_of(subschema)
+            # Update the base schema with subschema properties
+            for key, value in merged_sub.items():
+                if key == "properties":
+                    schema_properties = schema.get("properties", {})
+                    for ik, iv in value.items():
+                        # skip for overriden values
+                        if ik not in schema_properties:
+                            schema_properties.update({ik: iv})
+                    schema["properties"] = schema_properties
+                elif key not in schema:
+                    schema[key] = value
+    if "properties" in schema:
+        for k, v in schema["properties"].items():
+            schema["properties"][k] = merge_all_of(v)
+
+    if "items" in schema:
+        schema["items"] = merge_all_of(schema["items"])
+
+    return schema
+
+
+def remove_null_anyof(schema: dict[str, Any] | list[Any]) -> Any:
+    """Recursively removes {'type': 'null'} from anyOf lists"""
+    if isinstance(schema, dict):
+        if "anyOf" in schema:
+            anyOf = remove_null_anyof(
+                [
+                    i
+                    for i in schema.pop("anyOf", [])
+                    if i != {"type": "null"} and i != {"type": None}
+                ]
+            )
+            if len(anyOf) == 1:
+                schema.update(anyOf[0])
+            else:
+                schema["anyOf"] = anyOf
+        return {k: remove_null_anyof(v) for k, v in schema.items()}
+    elif isinstance(schema, list):
+        return [remove_null_anyof(i) for i in schema]
+    return schema
+
+
+def resolve_schema_references(schema: dict[str, Any]) -> Any:
+    """
+    Resolves a JSON schema by replacing references, merging 'allOf' lists and removing '$defs'.
+    """
+    schema = deepcopy(schema)
+    schema = remove_null_anyof(schema)
+    schema = dict(jsonref.replace_refs(schema, jsonschema=True, proxies=False))
+    schema = merge_all_of(schema)
+    schema.pop("$defs", None)
+    return json.loads(json.dumps(schema))

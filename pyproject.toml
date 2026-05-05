@@ -11,6 +11,7 @@ version = "0.1.0"
 description = "Domain-agnostic benchmark for evaluating LLM JSON extraction"
 requires-python = ">=3.10"
 dependencies = [
+    "jsonref>=1.1.0",
     "jsonschema>=4.0",
     "scipy>=1.10",
 ]
