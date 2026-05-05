@@ -127,12 +127,51 @@ class TestMissingFields:
         })
         # "extra" is not in the schema -- detected as hallucination
         results = score_record(schema, {"name": "Alice"}, {"name": "Alice", "extra": "ignored"})
+        by_path = {r.path: r for r in results}
         assert len(results) == 2
-        assert results[0].score == 1.0
-        assert results[1].status == "hallucination"
-        assert results[1].path == "extra"
-        assert results[1].extracted_value == "ignored"
-        assert results[1].gold_value is None
+        assert by_path["name"].score == 1.0
+        assert by_path["extra"].status == "hallucination"
+        assert by_path["extra"].extracted_value == "ignored"
+        assert by_path["extra"].gold_value is None
+
+    def test_multiple_extra_fields_sorted_order(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+            },
+        })
+        # Multiple extra keys -- hallucinations emitted in sorted order
+        results = score_record(
+            schema,
+            {"name": "Alice"},
+            {"name": "Alice", "zebra": 1, "alpha": 2, "mid": 3},
+        )
+        hallucinations = [r for r in results if r.status == "hallucination"]
+        assert len(hallucinations) == 3
+        assert [h.path for h in hallucinations] == ["alpha", "mid", "zebra"]
+
+    def test_extra_field_in_nested_object(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "details": {
+                    "type": "object",
+                    "properties": {
+                        "color": {"type": "string"},
+                    },
+                },
+            },
+        })
+        results = score_record(
+            schema,
+            {"details": {"color": "red"}},
+            {"details": {"color": "red", "weight": 5}},
+        )
+        by_path = {r.path: r for r in results}
+        assert by_path["details.color"].status == "match"
+        assert by_path["details.weight"].status == "hallucination"
+        assert by_path["details.weight"].extracted_value == 5
 
 
 # --- Null handling ---
