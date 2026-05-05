@@ -120,6 +120,8 @@ def merge_all_of(schema: dict[str, Any]) -> dict[str, Any]:
                         if ik not in schema_properties:
                             schema_properties.update({ik: iv})
                     schema["properties"] = schema_properties
+                elif key not in schema:
+                    schema[key] = value
     if "properties" in schema:
         for k, v in schema["properties"].items():
             schema["properties"][k] = merge_all_of(v)
@@ -130,25 +132,34 @@ def merge_all_of(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
-def resolve_schema(schema: dict[str, Any]) -> Any:
-    """
-    Resolves a JSON schema by replacing references, merging 'allOf' lists and removing '$defs'.
-    """
-    schema = jsonref.replace_refs(schema, jsonschema=True, proxies=False)
-    schema = merge_all_of(deepcopy(schema))
-    schema = remove_null_anyof(schema)
-    del schema["$defs"]
-    return json.loads(json.dumps(schema))
-
-
-def remove_null_anyof(schema: dict[str, Any]) -> dict[str, Any]:
+def remove_null_anyof(schema: dict[str, Any] | list[Any]) -> Any:
     """Recursively removes {'type': 'null'} from anyOf lists"""
     if isinstance(schema, dict):
         if "anyOf" in schema:
-            anyOf = [i for i in schema["anyOf"] if i != {"type": "null"} and i != {"type": None}]
+            anyOf = remove_null_anyof(
+                [
+                    i
+                    for i in schema.pop("anyOf", [])
+                    if i != {"type": "null"} and i != {"type": None}
+                ]
+            )
             if len(anyOf) == 1:
-                return remove_null_anyof(anyOf[0])
+                schema.update(anyOf[0])
+            else:
+                schema["anyOf"] = anyOf
         return {k: remove_null_anyof(v) for k, v in schema.items()}
     elif isinstance(schema, list):
         return [remove_null_anyof(i) for i in schema]
     return schema
+
+
+def resolve_schema_references(schema: dict[str, Any]) -> Any:
+    """
+    Resolves a JSON schema by replacing references, merging 'allOf' lists and removing '$defs'.
+    """
+    schema = deepcopy(schema)
+    schema = remove_null_anyof(schema)
+    schema = dict(jsonref.replace_refs(schema, jsonschema=True, proxies=False))
+    schema = merge_all_of(schema)
+    schema.pop("$defs", None)
+    return json.loads(json.dumps(schema))

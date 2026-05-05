@@ -1,7 +1,12 @@
 import pytest
 
-from struct_extract_eval.core.schema_inference import infer_schema
 from struct_extract_eval.core.json_utils import get_node_at_path
+from struct_extract_eval.core.schema_inference import (
+    infer_schema,
+    merge_all_of,
+    remove_null_anyof,
+    resolve_schema_references,
+)
 
 
 class TestInferSchema:
@@ -214,3 +219,167 @@ class TestInferSchema:
             {"b": 2},
         ])
         assert schema["required"] == []
+
+
+class TestMergeAllOf:
+    def test_merges_top_level_allof(self) -> None:
+        schema = {
+            "allOf": [
+                {"type": "object", "properties": {"a": {"type": "string"}}},
+                {"properties": {"b": {"type": "integer"}}},
+            ],
+        }
+
+        merged = merge_all_of(schema)
+
+        assert "allOf" not in merged
+        assert merged["type"] == "object"
+        assert merged["properties"]["a"] == {"type": "string"}
+        assert merged["properties"]["b"] == {"type": "integer"}
+
+    def test_keeps_existing_properties_on_conflict(self) -> None:
+        schema = {
+            "properties": {"a": {"type": "string"}},
+            "allOf": [
+                {"properties": {"a": {"type": "integer"}, "b": {"type": "number"}}},
+            ],
+        }
+
+        merged = merge_all_of(schema)
+
+        # Existing key is preserved (no overwrite)
+        assert merged["properties"]["a"] == {"type": "string"}
+        # New key from allOf is added
+        assert merged["properties"]["b"] == {"type": "number"}
+
+    def test_merges_nested_allof_in_properties_and_items(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "allOf": [
+                        {"type": "object", "properties": {"id": {"type": "string"}}},
+                        {"properties": {"source": {"type": "string"}}},
+                    ],
+                },
+            },
+            "items": {
+                "allOf": [
+                    {"type": "object", "properties": {"x": {"type": "integer"}}},
+                    {"properties": {"y": {"type": "integer"}}},
+                ],
+            },
+        }
+
+        merged = merge_all_of(schema)
+
+        assert merged["properties"]["meta"]["type"] == "object"
+        assert merged["properties"]["meta"]["properties"]["id"] == {"type": "string"}
+        assert merged["properties"]["meta"]["properties"]["source"] == {"type": "string"}
+
+        assert merged["items"]["type"] == "object"
+        assert merged["items"]["properties"]["x"] == {"type": "integer"}
+        assert merged["items"]["properties"]["y"] == {"type": "integer"}
+
+
+class TestRemoveNullAnyOf:
+    def test_removes_null_from_anyof(self) -> None:
+        schema = {"anyOf": [{"type": "null"}, {"type": "string"}]}
+
+        cleaned = remove_null_anyof(schema)
+
+        assert cleaned == {"type": "string"}
+
+    def test_keeps_anyof_when_multiple_non_null_options_remain(self) -> None:
+        schema = {
+            "anyOf": [
+                {"type": "null"},
+                {"type": "string"},
+                {"type": "integer"},
+            ],
+        }
+
+        cleaned = remove_null_anyof(schema)
+
+        assert "anyOf" in cleaned
+        assert cleaned["anyOf"] == [{"type": "string"}, {"type": "integer"}]
+
+    def test_processes_nested_dicts_and_lists(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "name": {"anyOf": [{"type": "null"}, {"type": "string"}]},
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "anyOf": [
+                            {"type": "null"},
+                            {"type": "string"},
+                        ],
+                    },
+                },
+            },
+        }
+
+        cleaned = remove_null_anyof(schema)
+
+        assert cleaned["properties"]["name"] == {"type": "string"}
+        assert cleaned["properties"]["tags"]["items"] == {"type": "string"}
+
+
+class TestResolveSchemaReferences:
+    def test_resolves_refs_merges_allof_and_removes_defs(self) -> None:
+        schema = {
+            "$defs": {
+                "Measurement": {
+                    "allOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "property": {
+                                    "anyOf": [
+                                        {"type": "null"},
+                                        {"type": "string"},
+                                    ],
+                                },
+                            },
+                        },
+                        {
+                            "properties": {
+                                "value": {
+                                    "anyOf": [
+                                        {"type": "null"},
+                                        {"type": "number"},
+                                    ],
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
+            "$ref": "#/$defs/Measurement",
+        }
+
+        resolved = resolve_schema_references(schema)
+
+        assert "$defs" not in resolved
+        assert "$ref" not in resolved
+        assert "allOf" not in resolved
+
+        assert resolved["type"] == "object"
+        assert resolved["properties"]["property"] == {"type": "string"}
+        assert resolved["properties"]["value"] == {"type": "number"}
+
+    def test_does_not_mutate_input(self) -> None:
+        schema = {
+            "$defs": {"T": {"anyOf": [{"type": "null"}, {"type": "string"}]}},
+            "$ref": "#/$defs/T",
+        }
+        original = {
+            "$defs": {"T": {"anyOf": [{"type": "null"}, {"type": "string"}]}},
+            "$ref": "#/$defs/T",
+        }
+
+        _ = resolve_schema_references(schema)
+
+        assert schema == original
