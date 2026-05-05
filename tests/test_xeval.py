@@ -130,6 +130,26 @@ class TestAnnotateXeval:
             _BUILTIN_TYPE_DEFAULTS.clear()
             _BUILTIN_TYPE_DEFAULTS.update(original)
 
+    def test_type_defaults_with_params(self) -> None:
+        """set_type_default() accepts dict form with params."""
+        original = dict(_BUILTIN_TYPE_DEFAULTS)
+        try:
+            set_type_default("number", {"numeric": {"tolerance": {"rel": 0.01}}})
+            schema: dict[str, object] = {
+                "type": "object",
+                "properties": {
+                    "temp": {"type": "number"},
+                    "name": {"type": "string"},
+                },
+            }
+            annotate_xeval(schema)
+            props = schema["properties"]
+            assert props["temp"]["x-eval-compare"] == {"numeric": {"tolerance": {"rel": 0.01}}}  # type: ignore[index]
+            assert props["name"]["x-eval-compare"] == "exact"  # type: ignore[index]
+        finally:
+            _BUILTIN_TYPE_DEFAULTS.clear()
+            _BUILTIN_TYPE_DEFAULTS.update(original)
+
     def test_type_defaults_do_not_override_explicit(self) -> None:
         """Explicit x-eval-compare on a field takes precedence over set_type_default."""
         original = dict(_BUILTIN_TYPE_DEFAULTS)
