@@ -28,7 +28,6 @@ from struct_extract_eval.core.comparators.comparator import (
 )
 from struct_extract_eval.core.comparators.registry import (
     _clear_registry,
-    _registry,
     register,
 )
 from struct_extract_eval.core.schema import SchemaNode
@@ -44,7 +43,7 @@ def _clean_registry() -> None:
     """Reset custom registry and remove any leftover registration."""
     _clear_registry()
     yield
-    _registry.pop("semantic", None)
+    _clear_registry()
 
 
 # --- SemanticBatchComparator ---

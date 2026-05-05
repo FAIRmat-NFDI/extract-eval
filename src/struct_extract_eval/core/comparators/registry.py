@@ -24,15 +24,23 @@ _BUILTIN_COMPARATORS: dict[str, Comparator | BatchComparator] = {
 _registry: dict[str, Comparator | BatchComparator] = {}
 
 
-def register(name: str, fn: Comparator | BatchComparator) -> None:
+def register(
+    name: str, fn: Comparator | BatchComparator, *, overwrite: bool = False,
+) -> None:
     """Register a custom comparator (per-field or batch) under the given name.
 
-    Raises ValueError if a comparator with this name is already registered.
-    Raises TypeError if fn is not callable.
+    Args:
+        name: Name to register under (referenced by ``x-eval-compare``).
+        fn: Callable comparator (per-field or batch).
+        overwrite: If True, silently replace an existing registration.
+            If False (default), raises ValueError on duplicate.
+
+    Raises ValueError if a comparator with this name is already registered
+    and overwrite is False. Raises TypeError if fn is not callable.
     """
     if not callable(fn):
         raise TypeError(f"Comparator must be callable, got {type(fn).__name__}")
-    if name in _registry or name in _BUILTIN_COMPARATORS:
+    if not overwrite and (name in _registry or name in _BUILTIN_COMPARATORS):
         raise ValueError(f"Comparator '{name}' is already registered")
     _registry[name] = fn
 
