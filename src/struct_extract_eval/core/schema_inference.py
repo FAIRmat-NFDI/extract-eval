@@ -1,8 +1,11 @@
 import json
+import logging
 from copy import deepcopy
 from typing import Any
 
 import jsonref
+
+logger = logging.getLogger(__name__)
 
 
 def infer_schema(instances: list[object]) -> dict[str, object]:
@@ -141,12 +144,33 @@ def remove_null_anyof(schema: dict[str, Any] | list[Any]) -> Any:
 
 
 def resolve_schema_references(schema: dict[str, Any]) -> Any:
+    """Resolve a JSON schema into a simplified form for evaluation.
+
+    Replaces ``$ref`` references, merges ``allOf`` lists, removes
+    ``anyOf: [type, null]`` wrappers, and drops ``$defs``.
+
+    Warns about JSON Schema keywords that are not handled:
+
+    - ``oneOf`` -- requires choosing one branch (not the same as anyOf)
+    - ``if``/``then``/``else`` -- conditional subschemas
+    - Constraint keywords (``enum``, ``const``, ``default``, ``minLength``,
+      ``maxLength``, ``minimum``, ``maximum``, ``exclusiveMinimum``,
+      ``exclusiveMaximum``, ``pattern``, ``format``) -- left in the
+      schema but ignored by the evaluator
     """
-    Resolves a JSON schema by replacing references, merging 'allOf' lists and removing '$defs'.
-    """
+    logger.warning(_RESOLVE_WARNING)
     schema = deepcopy(schema)
     schema = remove_null_anyof(schema)
     schema = dict(jsonref.replace_refs(schema, jsonschema=True, proxies=False))
     schema = merge_all_of(schema)
     schema.pop("$defs", None)
     return json.loads(json.dumps(schema))
+
+
+_RESOLVE_WARNING = """\
+resolve_schema_references handles $ref, allOf, and anyOf[type, null].
+The following are NOT handled and may cause issues:
+  - oneOf: type info lost, fields may get wrong comparator ('exact' instead of 'numeric')
+  - if/then/else: conditional properties lost, some fields won't be scored
+  - anyOf with multiple non-null types: same risk as oneOf
+Review the resolved output before passing to annotate_xeval."""

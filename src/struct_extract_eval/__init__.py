@@ -10,7 +10,10 @@ from struct_extract_eval.core.record import (
     RunResult,
 )
 from struct_extract_eval.core.schema import SchemaNode, parse_eval_schema
-from struct_extract_eval.core.schema_inference import infer_schema
+from struct_extract_eval.core.schema_inference import (
+    infer_schema,
+    resolve_schema_references,
+)
 from struct_extract_eval.core.field_result import FieldResult
 from struct_extract_eval.core.scoring import score_record
 from struct_extract_eval.core.transforms.transform import TransformSpec
@@ -41,6 +44,7 @@ __all__ = [
     "reset_type_defaults",
     "set_type_default",
     "infer_schema",
+    "resolve_schema_references",
     "parse_eval_schema",
     "parse_xeval_entry",
     "score_record",
