@@ -188,7 +188,7 @@ class TestInferSchema:
             {"a": 1},
             {"b": 2},
         ])
-        assert schema["required"] == []
+        assert schema.get("required", []) == []
 
 
 class TestMergeAllOf:

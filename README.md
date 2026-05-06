@@ -96,11 +96,18 @@ for path, agg in result.per_field.items():
 
 Evaluation has four steps. Each produces an inspectable artifact that you should review before moving to the next.
 
-### Step 1: Get a Resolved Schema From Gold Instances or Provide Your Own
+### Step 1: Get a Resolved Schema
 
-A resolved schema describes the structure of your data -- what fields exist and what types they are.
+A **resolved schema** is a simplified JSON Schema with only `type`, `properties`, and `items`. No composition
+keywords (`$ref`, `allOf`, `anyOf`, `oneOf`), no constraints (`minLength`, `enum`, `format`), no conditionals
+(`if/then/else`). This is what the evaluator works with.
 
-**Option A: Infer from gold instances.**
+There are two ways to get one:
+
+**Option A: Infer from gold instances** (recommended).
+
+Your gold data already resolves all ambiguity — a field is either `"number"` or `null`, never "number or null."
+`infer_schema()` reads the actual data and produces a clean resolved schema.
 
 ```python
 import json
@@ -116,7 +123,7 @@ with open("resolved_schema.json", "w") as f:
     json.dump(resolved_schema, f, indent=2)
 ```
 
-This produces a resolved schema:
+This produces:
 
 ```json
 {
@@ -131,19 +138,37 @@ This produces a resolved schema:
     "temperature": {
       "type": "integer"
     }
-  },
-  "required": [
-    "method",
-    "temperature"
-  ]
+  }
 }
 ```
 
-`lab_id` is absent in the second instance, so it is not included in the `required` array. `method` and `temperature` are
-present in every instance and are therefore marked required.
+**Option B: Resolve an existing JSON Schema.**
 
-**Option B: Provide your own.** If you already have a clean schema with only `type`, `properties`, `items`, and
-`required`, pass it directly.
+If you have an existing JSON Schema (e.g., from your data model), it may contain `$ref`, `allOf`,
+`anyOf`, `oneOf`, `if/then/else`, etc. `resolve_schema_references()` simplifies it:
+
+```python
+from struct_extract_eval import resolve_schema_references
+
+resolved_schema = resolve_schema_references(my_complex_schema)
+```
+
+This handles:
+- `$ref` → resolved inline
+- `allOf` → merged into one dict
+- `anyOf: [type, null]` → simplified to just `type`
+- `$defs` → removed
+
+**Not handled** (a warning is logged):
+- `oneOf` → type info inside branches is lost, fields may get wrong comparator
+- `if/then/else` → conditional properties are lost, some fields won't be scored
+- `anyOf` with multiple non-null types → same risk as `oneOf`
+
+If your schema uses these, **Option A (infer from gold) is safer** — the gold data already
+resolved all the conditional/polymorphic ambiguity.
+
+**Option C: Write your own.** If you already have a clean schema with only `type`, `properties`,
+and `items`, pass it directly — no resolution needed.
 
 ### Step 2: Annotate with Eval Defaults
 
@@ -282,12 +307,14 @@ for path, agg in result.per_field.items():
 The evaluator walks the schema tree (not the data). Only **leaf fields** (strings, numbers, booleans) are scored --
 container nodes (objects, arrays) are structural scaffolding. For each leaf, it checks presence in gold and extracted:
 
-| Gold has field? | Extracted has field? | What happens                                        |
-|-----------------|----------------------|-----------------------------------------------------|
-| Yes             | Yes                  | Compare using the field's comparator                 |
-| Yes             | No                   | **Omission** -- penalizes recall                     |
-| No              | Yes                  | **Hallucination** -- penalizes precision              |
-| No              | No                   | Nothing -- the field does not exist for this record  |
+| In schema? | Gold has field? | Extracted has field? | What happens                                        |
+|------------|-----------------|----------------------|-----------------------------------------------------|
+| Yes        | Yes             | Yes                  | Compare using the field's comparator                 |
+| Yes        | Yes             | No                   | **Omission** -- penalizes recall                     |
+| Yes        | No              | Yes                  | **Hallucination** -- penalizes precision              |
+| Yes        | No              | No                   | Nothing -- the field does not exist for this record  |
+| No         | --              | Yes                  | **Hallucination** -- extractor invented an unknown field |
+| No         | --              | No                   | Nothing -- invisible to the evaluator                |
 
 **Example:** Given this schema and data:
 
@@ -327,8 +354,9 @@ Result: 3 fields scored. `lab_id` is in gold, so the extractor is expected to pr
     value (e.g., a "description" field the extractor should always produce, but whose content doesn't matter), don't use
     skip. Instead, use a custom comparator that always returns score 1.0. The field will participate in scoring normally
     -- omission if missing, hallucination if extra -- but any value is accepted when both sides are present.
-- **Only schema-defined fields are evaluated.** Extra fields in the data that don't appear in the schema are invisible to
-  the evaluator -- no penalty, no hallucination.
+- **Extra fields in extracted are hallucinations.** If the extractor produces fields not defined in the schema, each extra
+  field counts as a hallucination (penalizes precision). Extra fields in gold that are not in the schema are ignored --
+  use `validate_gold(warn_extra=True)` to catch these before evaluation.
 
 ---
 
@@ -507,7 +535,7 @@ scalar.
 | `total_records`        | `int`                         | Number of json record evaluated       |
 | `total_fields`         | `int`                         | Total scored fields (excludes `x-eval-skip`) |
 | `total_omissions`      | `int`                         | Fields missing from extracted         |
-| `total_hallucinations` | `int`                         | Extra elements in extracted           |
+| `total_hallucinations` | `int`                         | Extra fields/elements in extracted (includes fields not in schema) |
 | `per_field`            | `dict[str, FieldAggregation]` | Per-field-path breakdown              |
 
 ### `FieldAggregation` -- per field path across all records
@@ -530,6 +558,7 @@ with.
 | Function                                       | Purpose                                                          |
 |------------------------------------------------|------------------------------------------------------------------|
 | `infer_schema(instances)`                      | Infer resolved schema from gold instances                        |
+| `resolve_schema_references(schema)`            | Simplify a complex JSON Schema ($ref, allOf, anyOf) into a resolved schema |
 | `annotate_xeval(schema)`                       | Annotate a resolved schema with `x-eval-*` defaults (in-place)   |
 | `set_type_default(json_type, comparator)`      | Change the default comparator for a JSON type                    |
 | `reset_type_defaults()`                        | Reset type-defaults mapping to built-in defaults                 |
