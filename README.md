@@ -98,9 +98,11 @@ Evaluation has four steps. Each produces an inspectable artifact that you should
 
 ### Step 1: Get a Resolved Schema
 
-A **resolved schema** is a simplified JSON Schema with only `type`, `properties`, and `items`. No composition
-keywords (`$ref`, `allOf`, `anyOf`, `oneOf`), no constraints (`minLength`, `enum`, `format`), no conditionals
-(`if/then/else`). This is what the evaluator works with.
+A **resolved schema** is a simplified JSON Schema that the evaluator reads structurally through `type`,
+`properties`, and `items`. Composition keywords such as `$ref`, `allOf`, `anyOf`, and `oneOf`, and conditionals
+such as `if/then/else`, should be resolved away. Other JSON Schema constraint keywords such as `minLength`, `enum`,
+and `format` may still be present in the resolved schema object, but they are ignored by evaluation unless you
+explicitly translate them into `x-eval-*` behavior.
 
 There are two ways to get one:
 
