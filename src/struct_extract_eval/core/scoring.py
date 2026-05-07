@@ -144,14 +144,23 @@ def _score_object(
         extracted_has = field_name in extracted_dict
 
         if gold_has and extracted_has:
+            # Schema has key, gold has key, extracted has key -> compare values
             results.extend(_score_node(child, gold_dict[field_name], extracted_dict[field_name]))
         elif gold_has and not extracted_has:
+            # Schema has key, gold has key, extracted missing -> omission
             results.extend(_omission_results(child, gold_dict[field_name]))
         elif extracted_has and not gold_has:
+            # Schema has key, gold missing, extracted has key -> hallucination
             results.extend(_hallucination_results(child, extracted_dict[field_name]))
+        # else: schema has key, gold missing, extracted missing -> skip (nothing to score)
 
-    # Extra keys in extracted that are not in the schema -> hallucinations, regardless if gold has these keys.
-    # One hallucination per extra key (no recursion into nested values).
+    # hallucination: extracted has keys that is not in gold. These keys might be in eval schema,
+    # might not. The extra keys in extracted, in eval schema but not in gold, is dealt by the above logic,
+    # The extra keys in extracted, not in eval schema (indicate also not in gold), should be checked and label
+    # as hallucination.
+    # Extra keys in extracted that are not in the schema -> hallucination.
+    # All gold fields must be in the schema (enforced by validate_gold),
+    # so we only need to check extracted for extra keys.
     schema_fields = {
         child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
         for child in node.children

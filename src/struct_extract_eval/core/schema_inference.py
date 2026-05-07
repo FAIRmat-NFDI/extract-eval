@@ -169,8 +169,8 @@ def resolve_schema_references(schema: dict[str, Any]) -> Any:
 
 _RESOLVE_WARNING = """\
 resolve_schema_references handles $ref, allOf, and anyOf[type, null].
-The following are NOT handled and may cause issues:
-  - oneOf: type info lost, fields may get wrong comparator ('exact' instead of 'numeric')
-  - if/then/else: conditional properties lost, some fields won't be scored
-  - anyOf with multiple non-null types: same risk as oneOf
-Review the resolved output before passing to annotate_xeval."""
+The following are NOT handled:
+  - oneOf: type info lost, field has no 'type' key -> SchemaError at parse time
+  - anyOf with multiple non-null types: same as oneOf
+  - if/then/else: conditional properties lost -- may cause SchemaError or silently miss fields
+For schemas with these keywords, use infer_schema(gold_instances) instead."""
