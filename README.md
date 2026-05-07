@@ -388,8 +388,11 @@ Result: 3 fields scored. `lab_id` is in gold, so the extractor is expected to pr
     skip. Instead, use a custom comparator that always returns score 1.0. The field will participate in scoring normally
     -- omission if missing, hallucination if extra -- but any value is accepted when both sides are present.
 - **Extra fields in extracted are hallucinations.** If the extractor produces fields not defined in the schema, each extra
-  field counts as a hallucination (penalizes precision). Extra fields in gold are not allowed --
-  `validate_gold()` raises an error. If a gold field shouldn't be scored, add it to the schema with `x-eval-skip: true`.
+  field counts as a hallucination (penalizes precision). This is checked against the **schema**, not against gold --
+  even if both gold and extracted have the field, it's a hallucination if the schema doesn't define it, because
+  without `x-eval-compare` the evaluator has no comparator and cannot meaningfully score it. Extra fields in gold
+  are not allowed -- `validate_gold()` raises an error. If a gold field shouldn't be scored, add it to the schema
+  with `x-eval-skip: true`.
 
 ---
 
