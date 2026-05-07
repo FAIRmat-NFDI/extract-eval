@@ -154,3 +154,47 @@ class TestValidateGold:
             validate_gold(
                 [{"id": True, "name": "Alice"}], schema, id_field="id"
             )
+
+    def test_extra_gold_field_raises(self) -> None:
+        """Gold field not in schema raises GoldValidationError."""
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+            },
+        })
+        with pytest.raises(GoldValidationError, match="not in schema"):
+            validate_gold([{"name": "Alice", "extra": "bad"}], schema)
+
+    def test_extra_gold_field_nested_raises(self) -> None:
+        """Extra field inside a nested object also raises."""
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {
+                "person": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                    },
+                },
+            },
+        })
+        with pytest.raises(GoldValidationError, match="not in schema"):
+            validate_gold(
+                [{"person": {"name": "Alice", "age": 30}}], schema
+            )
+
+    def test_id_field_not_in_schema_does_not_raise(self) -> None:
+        """id_field is excluded from extra-key check."""
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+            },
+        })
+        # "doi" is the id_field but not in schema -- should not raise
+        validate_gold(
+            [{"doi": "10.1234", "name": "Alice"}],
+            schema,
+            id_field="doi",
+        )

@@ -1,40 +1,34 @@
 # Struct Extract Eval
 
-
 Domain-agnostic, field-level evaluation for LLM structured JSON extraction.
 
-## The Problem
+## Why This Package
 
-Given text and a JSON schema, an LLM produces a JSON instance. Exact match against a gold JSON is useless: there is no
-single correct output. `"New York"` vs `"NYC"`, `42` vs `42.0` -- both semantically
-equivalent, all fail string equality. Worse, a single overall score tells you nothing about *which* fields are wrong or
-*how* they are wrong -- missed, hallucinated, or slightly off.
+When an LLM extracts structured data from text, you need to know: **how good is it?**
+Exact match against a gold JSON is useless -- `"New York"` vs `"NYC"`, `42` vs `42.0`
+are semantically equivalent but fail string equality. And a single overall score tells
+you nothing about *which* fields are wrong or *how* they are wrong.
 
-## The Approach
+This package helps you:
+- **Optimize prompts** for LLM data extraction
+- **Compare models** for extraction quality
+- **Compare extraction pipelines** end to end
 
-Walk the schema, compare each field with the right tool for its type, and aggregate:
+## What It Provides
 
-- **Per-field comparators** -- `exact` for IDs and enums, `numeric` with tolerance for floats, `oneof` for known
-  synonyms, `semantic` for free text via an LLM judge. Custom comparators can be registered.
-- **Skip** -- `x-eval-skip: true` makes a field fully invisible to scoring. No value comparison, no presence check, no
-  contribution to any metric.
-- **Transforms** -- chain preprocessing steps (`lowercase`, `strip`, `round_digits`, ...) before comparison.
-- **Structural alignment** -- match objects by key name, arrays by position (key-field and Hungarian matching planned).
-- **Precision / recall / F1** -- precision penalizes hallucinated fields, recall penalizes omissions. Per-record and
-  per-field aggregation show exactly where the extractor fails.
-
-All configuration lives in the schema itself, as `x-eval-*` extension keys: one file, no drift.
-
-## Scope
-
-**This package is a comparator, not a validator.** It does not enforce JSON Schema constraints (`default`, `minLength`,
-`format`, `enum`, etc.). It uses the schema only for structure and eval config. Validation belongs to your extraction
-pipeline; this package evaluates the result.
-
-**The schema input is a simplified "resolved" schema** -- only `type`, `properties`, `items`, and `required`. No
-`x-eval-*` keys, no composition (`$ref`, `allOf`, `anyOf`, `oneOf`), no conditionals (`if`/`then`/`else`), no
-constraints. If your original schema uses these, resolve them yourself before passing it in. By the time data reaches
-this package, the only question is: what fields exist and what type are they.
+- **Per-field evaluation.** Each field is scored independently with its own comparator
+  and transform chain. Custom comparators can be registered for domain-specific needs.
+- **Type-aware comparison.** Strings, numbers, booleans, arrays, and nested objects are
+  each handled appropriately (`exact`, `numeric`, `oneof`, `semantic` via LLM judge).
+- **Semantic equivalence.** Free-text fields can be judged by an LLM -- paraphrases
+  count as correct, factual disagreements don't.
+- **Diagnostic metrics.** Precision, recall, and F1 at per-record and per-field level.
+  Trace exactly which fields were missed (omissions), invented (hallucinations), or
+  wrong (mismatches).
+- **Array alignment.** Ordered, key-field, or Hungarian bipartite matching for arrays
+  where element order may differ.
+- **Single source of truth.** All evaluation config lives in the schema as `x-eval-*`
+  extension keys. One file, no drift.
 
 ## Installation
 
@@ -94,7 +88,44 @@ for path, agg in result.per_field.items():
 
 ## How Evaluation Works
 
-Evaluation has four steps. Each produces an inspectable artifact that you should review before moving to the next.
+### The Workflow
+
+```
+  Gold Instances          Existing JSON Schema
+       |                        |
+       v                        v
+ infer_schema()      resolve_schema_references()
+       |                        |
+       +----------+-------------+
+                  |
+                  v
+           Resolved Schema
+          (type, properties,
+           items only)
+                  |
+                  v
+         annotate_xeval()
+                  |
+                  v
+          Eval Schema (with x-eval-*)
+                  |
+                  v
+          User reviews and edits
+                  |
+                  v
+          validate_gold()          <-- optional but recommended
+                  |
+                  v
+     evaluate(gold, extracted, schema)
+                  |
+                  v
+             RunResult
+       (precision, recall, F1,
+        per-field breakdown,
+        per-record detail)
+```
+
+Evaluation has five steps. Each produces an inspectable artifact that you should review before moving to the next.
 
 ### Step 1: Get a Resolved Schema
 
@@ -357,8 +388,11 @@ Result: 3 fields scored. `lab_id` is in gold, so the extractor is expected to pr
     skip. Instead, use a custom comparator that always returns score 1.0. The field will participate in scoring normally
     -- omission if missing, hallucination if extra -- but any value is accepted when both sides are present.
 - **Extra fields in extracted are hallucinations.** If the extractor produces fields not defined in the schema, each extra
-  field counts as a hallucination (penalizes precision). Extra fields in gold that are not in the schema are ignored --
-  use `validate_gold(warn_extra=True)` to catch these before evaluation.
+  field counts as a hallucination (penalizes precision). This is checked against the **schema**, not against gold --
+  even if both gold and extracted have the field, it's a hallucination if the schema doesn't define it, because
+  without `x-eval-compare` the evaluator has no comparator and cannot meaningfully score it. Extra fields in gold
+  are not allowed -- `validate_gold()` raises an error. If a gold field shouldn't be scored, add it to the schema
+  with `x-eval-skip: true`.
 
 ---
 
@@ -581,9 +615,8 @@ from struct_extract_eval import parse_eval_schema, validate_gold
 parse_eval_schema(eval_schema)  # raises SchemaError if invalid
 
 # 2. Check gold data against the schema
-validate_gold(gold, eval_schema)                        # type errors + all warnings
+validate_gold(gold, eval_schema)                        # type errors + extra-field errors + missing warnings
 validate_gold(gold, eval_schema, warn_missing=False)    # suppress missing-field warnings
-validate_gold(gold, eval_schema, warn_extra=False)      # suppress extra-field warnings
 ```
 
 ---

@@ -2,9 +2,13 @@
 
 ``validate_gold(gold, schema, ...)``
     Validates gold data against an eval schema. Raises ``GoldValidationError``
-    on type errors (string where dict expected, etc.). Optionally warns about:
+    on:
+    - Type errors (string where dict expected, etc.)
+    - Extra fields in gold that are not in the schema (all gold fields must
+      be defined in the eval schema)
+
+    Optionally warns about:
     - Fields in the schema that are missing from a gold record (``warn_missing``)
-    - Extra fields in gold that are not in the schema (``warn_extra``)
 
 Schema validation is handled by ``parse_eval_schema()`` in ``core/schema.py``.
 ``validate_gold`` calls it internally, so schema errors are caught automatically.
@@ -35,42 +39,41 @@ def validate_gold(
     schema: dict[str, object],
     id_field: str | None = None,
     warn_missing: bool = True,
-    warn_extra: bool = True,
 ) -> None:
     """Validate gold data against an eval schema.
 
-    Always checks type errors (raises ``GoldValidationError``):
-    - String where dict expected at an object path
-    - Integer where list expected at an array path
+    Always checks (raises ``GoldValidationError``):
+    - Type errors: string where dict expected, integer where list expected
+    - Extra fields: field present in gold but not defined in schema. All gold
+      fields must be in the eval schema. If a field shouldn't be scored, add
+      it to the schema with ``x-eval-skip: true``.
 
-    Optionally warns about field presence issues (configurable):
+    Optionally warns about (configurable):
     - ``warn_missing``: field defined in schema but absent from a gold record.
       These fields will be ignored during scoring for that record (not an
       omission -- omission only happens when gold has a field and extracted
       doesn't).
-    - ``warn_extra``: field present in gold but not defined in schema.
-      These fields are invisible to scoring -- they won't be compared,
-      won't count as matches, and won't count as hallucinations.
 
-    With large datasets or many optional fields, warnings can be verbose.
-    Turn off the ones you don't need::
+    With large datasets or many optional fields, missing-field warnings can
+    be verbose. Turn them off if needed::
 
-        validate_gold(gold, schema, warn_missing=False)  # only type errors + extra
-        validate_gold(gold, schema, warn_extra=False)     # only type errors + missing
-        validate_gold(gold, schema, warn_missing=False, warn_extra=False)  # type errors only
+        validate_gold(gold, schema, warn_missing=False)
 
     Args:
         gold: Gold (ground truth) instances.
         schema: Eval schema (resolved schema with x-eval-* annotations).
         id_field: Field name to use as record ID. Defaults to integer index.
         warn_missing: Warn when a schema field is absent from a gold record.
-        warn_extra: Warn when a gold field is not defined in the schema.
 
     Raises:
-        GoldValidationError: if a gold value has the wrong type.
+        GoldValidationError: if a gold value has the wrong type, or if gold
+            contains fields not defined in the schema.
         SchemaError: if the schema itself is invalid (checked first).
     """
     tree = parse_eval_schema(schema)
+    # id_field is a record identifier, not a scored field -- exclude it
+    # from the extra-key check so it doesn't need to be in the schema.
+    ignore_keys = {id_field} if id_field else set()
     for i, g in enumerate(gold):
         if id_field:
             if id_field not in g:
@@ -92,7 +95,7 @@ def validate_gold(
             record_id: str | int = raw_id
         else:
             record_id = i
-        _validate_node(tree, g, record_id, warn_missing, warn_extra)
+        _validate_node(tree, g, record_id, warn_missing, ignore_keys)
 
 
 def _validate_node(
@@ -100,7 +103,7 @@ def _validate_node(
     gold_value: object,
     record_id: str | int,
     warn_missing: bool,
-    warn_extra: bool,
+    ignore_keys: set[str] | None = None,
 ) -> None:
     """Recursively validate a gold value against a schema node."""
     if gold_value is None:
@@ -125,7 +128,7 @@ def _validate_node(
             if field_name in gold_value:
                 _validate_node(
                     child, gold_value[field_name], record_id,
-                    warn_missing, warn_extra,
+                    warn_missing,
                 )
             elif warn_missing:
                 logger.warning(
@@ -134,15 +137,18 @@ def _validate_node(
                     record_id, child.path,
                 )
 
-        if warn_extra:
-            for key in gold_value:
-                if key not in schema_fields:
-                    path = f"{node.path}.{key}" if node.path else key
-                    logger.warning(
-                        "Record %r: field '%s' is in gold but not in "
-                        "schema. It will be invisible to scoring.",
-                        record_id, path,
-                    )
+        skip = ignore_keys or set()
+        for key in gold_value:
+            if key not in schema_fields and key not in skip:
+                path = f"{node.path}.{key}" if node.path else key
+                raise GoldValidationError(
+                    f"Record {record_id!r}: field '{path}' is in gold but "
+                    f"not in schema. All gold fields must be defined in the "
+                    f"eval schema. If this field should not be scored, add it "
+                    f"to the schema with x-eval-skip: true.",
+                    record_id=record_id,
+                    path=path,
+                )
 
     elif node.json_type == "array" and node.children:
         if not isinstance(gold_value, list):
@@ -155,5 +161,5 @@ def _validate_node(
         items_node = node.children[0]
         for item in gold_value:
             _validate_node(
-                items_node, item, record_id, warn_missing, warn_extra,
+                items_node, item, record_id, warn_missing,
             )
