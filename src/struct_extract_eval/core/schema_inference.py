@@ -173,4 +173,4 @@ The following are NOT handled:
   - oneOf: type info lost, field has no 'type' key -> SchemaError at parse time
   - anyOf with multiple non-null types: same as oneOf
   - if/then/else: conditional properties lost -- may cause SchemaError or silently miss fields
-For schemas with these keywords, use infer_schema(gold_instances) instead."""
+For schemas with these keywords, use infer_schema(instances) instead."""

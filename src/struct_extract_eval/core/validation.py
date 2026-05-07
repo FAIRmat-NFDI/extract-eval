@@ -71,6 +71,9 @@ def validate_gold(
         SchemaError: if the schema itself is invalid (checked first).
     """
     tree = parse_eval_schema(schema)
+    # id_field is a record identifier, not a scored field -- exclude it
+    # from the extra-key check so it doesn't need to be in the schema.
+    ignore_keys = {id_field} if id_field else set()
     for i, g in enumerate(gold):
         if id_field:
             if id_field not in g:
@@ -92,7 +95,7 @@ def validate_gold(
             record_id: str | int = raw_id
         else:
             record_id = i
-        _validate_node(tree, g, record_id, warn_missing)
+        _validate_node(tree, g, record_id, warn_missing, ignore_keys)
 
 
 def _validate_node(
@@ -100,6 +103,7 @@ def _validate_node(
     gold_value: object,
     record_id: str | int,
     warn_missing: bool,
+    ignore_keys: set[str] | None = None,
 ) -> None:
     """Recursively validate a gold value against a schema node."""
     if gold_value is None:
@@ -133,8 +137,9 @@ def _validate_node(
                     record_id, child.path,
                 )
 
+        skip = ignore_keys or set()
         for key in gold_value:
-            if key not in schema_fields:
+            if key not in schema_fields and key not in skip:
                 path = f"{node.path}.{key}" if node.path else key
                 raise GoldValidationError(
                     f"Record {record_id!r}: field '{path}' is in gold but "
