@@ -389,5 +389,4 @@ Step-by-step Jupyter notebooks in `examples/`:
 | `validate_gold(gold, schema, ...)` | Validate gold against schema (type errors, extra-field errors, missing-field warnings) |
 | `evaluate(gold, extracted, schema)` | Evaluate gold vs extracted using a reviewed eval schema |
 | `register(name, fn, overwrite=False)` | Register a custom comparator |
-
 ---
