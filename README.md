@@ -4,15 +4,15 @@ Domain-agnostic, field-level evaluation for LLM structured JSON extraction.
 
 ## Why This Package
 
-When an LLM extracts structured data from text, you need to know: **how good is it?**
+When an LLM extracts structured data from text, you need to know: how good is it?
 Exact match against a gold JSON is useless -- `"New York"` vs `"NYC"`, `42` vs `42.0`
 are semantically equivalent but fail string equality. And a single overall score tells
-you nothing about *which* fields are wrong or *how* they are wrong.
+you nothing about which fields are wrong or how they are wrong.
 
 This package helps you:
-- **Optimize prompts** for LLM data extraction
-- **Compare models** for extraction quality
-- **Compare extraction pipelines** end to end
+- Optimize prompts for LLM data extraction
+- Compare models for extraction quality
+- Compare extraction pipelines end to end
 
 ## What It Provides
 
@@ -28,6 +28,8 @@ This package helps you:
   (e.g. treating null values as absent for constrained-output tools).
 - **Array alignment.** Ordered, key-field, or Hungarian bipartite matching for arrays
   where element order may differ.
+- **Post-processing.** Plug in custom logic to adjust how fields are scored before
+  final metrics are computed. Built-in and custom post-processors supported.
 - **Single source of truth.** All evaluation config lives in the schema as `x-eval-*`
   extension keys. One file, no drift.
 
@@ -53,8 +55,12 @@ Requires Python >= 3.10.
 | **Extracted** | LLM-produced JSON instances (what the extractor actually output) |
 | **Resolved schema** | A simplified JSON schema with only `type`, `properties`, and `items` -- no `$ref`, `allOf`, `anyOf`, etc. |
 | **Eval schema** | A resolved schema annotated with `x-eval-*` keys that tells the evaluator how to compare each field |
+| **Transform** | A preprocessing step applied to both gold and extracted values before comparison (e.g. `lowercase`, `strip`). Configured via `x-eval-transform`. |
+| **Comparator** | A function that scores one field by comparing gold and extracted values. Built-ins: `exact`, `numeric`, `oneof`. Custom comparators can be registered. |
+| **Batch comparator** | A comparator that receives all fields in a record that use it and scores them together (e.g. LLM judge for semantic comparison, or compound comparators for grouped fields like name parts). |
+| **Post-processor** | A function that reclassifies field results after scoring but before metrics are computed (e.g. treating null values as absent). |
 
-### Field Statuses
+### Default Field Statuses
 
 Every leaf field gets one of these statuses after scoring:
 
@@ -65,6 +71,8 @@ Every leaf field gets one of these statuses after scoring:
 | **omission** | In gold but missing key from extracted                                      | Lowers recall only |
 | **hallucination** | Key not in gold but present in extracted, or not in schema but in extracted | Lowers precision only |
 | **skipped** | Field marked `x-eval-skip: true`                                            | Excluded from all metrics |
+
+Field Statuses can be changed by post-processors before metrics are computed. Please check `examples/06_example_postprocess` for details.
 
 ### Scoring: Precision, Recall, F1
 
@@ -136,8 +144,7 @@ an error if gold has fields not in the schema.
 ## Quick Start
 
 ```python
-import json
-from struct_extract_eval import evaluate, infer_schema, annotate_xeval
+from struct_extract_eval import evaluate, infer_schema, annotate_xeval, parse_xeval_schema, validate_gold
 
 gold = [
     {"method": "sputtering", "temperature": 300, "lab_id": "A1"},
@@ -154,9 +161,14 @@ annotate_xeval(eval_schema)
 
 # 2. Review and customize eval_schema (edit x-eval-* keys)
 
+# 3.  Validate gold against eval_schema to catch errors and omissions
+# and parse schema to ensure no errors before evaluation.
+parse_xeval_schema(eval_schema)
+validate_gold(gold, eval_schema)
+
+
 # 3. Evaluate
 result = evaluate(gold, extracted, schema=eval_schema)
-
 print(f"F1: {result.mean_f1:.2f}")
 print(f"Precision: {result.mean_precision:.2f}")
 print(f"Recall: {result.mean_recall:.2f}")
@@ -232,8 +244,8 @@ in a record that use them and score them together in one call. Two use cases:
 - **Compound comparators**: groups sibling fields (e.g. `surname` + `name`) and scores
   them as a unit.
 
-Batch comparators are not registered by default. See `04_example_semantic` and
-`05_example_compound` in the examples.
+Batch comparators are not registered by default. See `examples/04_example_semantic.ipynb` and
+`examples/05_example_compound.ipynb` in the examples.
 
 ---
 
@@ -268,7 +280,7 @@ extracted element?
 After alignment, matched pairs are scored recursively. Unmatched gold elements are
 omissions. Unmatched extracted elements are hallucinations.
 
-See `03_example_arrays` in the examples.
+See `examples/03_example_arrays.ipynb` in the examples.
 
 ---
 
