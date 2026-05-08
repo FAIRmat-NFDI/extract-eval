@@ -71,8 +71,10 @@ Every leaf field gets one of these statuses after scoring:
 | **omission** | In gold but missing key from extracted                                      | Lowers recall only |
 | **hallucination** | Key not in gold but present in extracted, or not in schema but in extracted | Lowers precision only |
 | **skipped** | Field marked `x-eval-skip: true`                                            | Excluded from all metrics |
+| **pending** | Awaiting batch comparator dispatch (internal, resolved before metrics)       | Excluded from all metrics |
+| **batch_error** | Batch comparator failed for this field                                       | Excluded from all metrics |
 
-Field Statuses can be changed by post-processors before metrics are computed. Please check `examples/06_example_postprocess` for details.
+Field statuses can be changed by post-processors before metrics are computed.
 
 ### Scoring: Precision, Recall, F1
 
@@ -97,8 +99,10 @@ Run-level metrics (`mean_precision`, `mean_recall`, `mean_f1`) are the arithmeti
 | No | -- | Yes | **Hallucination** -- extractor invented an unknown field |
 | No | -- | No | Nothing -- invisible to the evaluator |
 
-**Important:** All gold instances fields must be defined in the eval schema, so that we know how to evaluate the field. but gold instance can miss a field in eval schema. `validate_gold()` raises
-an error if gold has fields not in the schema.
+**Important:** All gold fields must be defined in the eval schema, so the evaluator knows
+how to score them. A gold instance can omit a field that is in the schema (it simply won't
+be scored for that record). `validate_gold()` raises an error if gold has fields not in
+the schema.
 
 ---
 
@@ -144,7 +148,7 @@ an error if gold has fields not in the schema.
 ## Quick Start
 
 ```python
-from struct_extract_eval import evaluate, infer_schema, annotate_xeval, parse_xeval_schema, validate_gold
+from struct_extract_eval import evaluate, infer_schema, annotate_xeval, parse_eval_schema, validate_gold
 
 gold = [
     {"method": "sputtering", "temperature": 300, "lab_id": "A1"},
@@ -163,7 +167,7 @@ annotate_xeval(eval_schema)
 
 # 3.  Validate gold against eval_schema to catch errors and omissions
 # and parse schema to ensure no errors before evaluation.
-parse_xeval_schema(eval_schema)
+parse_eval_schema(eval_schema)
 validate_gold(gold, eval_schema)
 
 
@@ -182,14 +186,19 @@ for path, agg in result.per_field.items():
 
 ## Comparators
 
-Built-in comparators:
+Built-in comparators (registered by default):
 
 | Comparator | Use case | Score |
 |------------|----------|-------|
 | `exact` | Booleans, enums, IDs, short strings | 0 or 1. Strict type and value equality. |
 | `numeric` | Numbers | 0 or 1. Within tolerance = 1, outside = 0. Default: exact equality. |
 | `oneof` | Fields with known acceptable synonyms | 1 if extracted matches any value in list, 0 otherwise. |
-| `semantic` | Free-text fields (paraphrases, synonyms) | 0 or 1. Uses an LLM judge. Must be registered before use (see examples). |
+
+Provided batch comparator (must be registered by the user before use):
+
+| Comparator | Use case | Score |
+|------------|----------|-------|
+| `semantic` | Free-text fields (paraphrases, synonyms) | 0 or 1. Uses an LLM judge. Short-circuits on exact string match. See `examples/04_example_semantic`. |
 
 Schema examples:
 
@@ -289,7 +298,7 @@ See `examples/03_example_arrays.ipynb` in the examples.
 Post-processors run after field scoring and can reclassify field results and influence the score matrix. Pass them to
 `evaluate(post_process=...)`.
 
-See `06_example_postprocess` in the examples.
+See the `reclassify_nulls` and `propagate_batch_errors` APIs.
 
 ---
 
@@ -324,6 +333,7 @@ Config syntax: both `x-eval-compare` and `x-eval-transform` entries use the same
 | `total_fields` | `int` | Total scored fields |
 | `total_omissions` | `int` | Fields missing from extracted |
 | `total_hallucinations` | `int` | Extra fields in extracted |
+| `total_batch_errors` | `int` | Fields where batch comparator failed |
 | `per_field` | `dict[str, FieldAggregation]` | Per-field-path breakdown |
 
 ### `RecordResult`
@@ -363,7 +373,6 @@ Step-by-step Jupyter notebooks in `examples/`:
 | `03_example_arrays` | Array alignment (ordered, key-field, Hungarian) |
 | `04_example_semantic` | Batch comparators and the LLM semantic judge |
 | `05_example_compound` | Compound comparators (grouping sibling fields) |
-| `06_example_postprocess` | Post-processing (null handling for constrained-output tools) |
 
 ---
 
