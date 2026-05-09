@@ -385,6 +385,10 @@ register("date", compare_date)
 
 Schema: `"x-eval-compare": {"date": {"formats": ["%Y-%m-%d", "%b %d, %Y"]}}`
 
+Use `overwrite=True` to replace an existing custom registration (e.g. in notebooks):
+`register("date", compare_date, overwrite=True)`. Built-in comparators (`exact`,
+`numeric`, `oneof`) cannot be overwritten.
+
 ---
 
 ## Transforms

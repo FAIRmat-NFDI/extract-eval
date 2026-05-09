@@ -75,8 +75,6 @@ def reset_type_defaults() -> None:
 
 
 
-
-
 def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, object]]:
     """Parse the two-shape config rule into ``(function name, function params)``.
 
@@ -86,18 +84,19 @@ def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, ob
     Raises ``TypeError`` for invalid types, ``ValueError`` for bad structure.
     """
     if isinstance(entry, str):
+        if not entry:
+            raise ValueError("Config name must be a non-empty string")
         return entry, {}
     if isinstance(entry, dict):
         if len(entry) != 1:
             raise ValueError(
                 f"Config object must have exactly one key, got {len(entry)}: {list(entry)}"
             )
-        (name,) = entry
-        if not isinstance(name, str):
+        (name, params), = entry.items()
+        if not isinstance(name, str) or not name:
             raise TypeError(
-                f"Config key must be a string, got {type(name).__name__}: {name!r}"
+                f"Config key must be a non-empty string, got {type(name).__name__}: {name!r}"
             )
-        params = entry[name]
         if not isinstance(params, dict):
             raise ValueError(
                 f"Params for '{name}' must be a dict, got {type(params).__name__}"

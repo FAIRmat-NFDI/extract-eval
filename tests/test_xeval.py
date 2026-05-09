@@ -29,6 +29,14 @@ class TestParseXevalEntry:
         with pytest.raises(ValueError, match="exactly one key"):
             parse_xeval_entry({"a": {}, "b": {}})
 
+    def test_empty_string_raises(self) -> None:
+        with pytest.raises(ValueError, match="non-empty string"):
+            parse_xeval_entry("")
+
+    def test_empty_dict_key_raises(self) -> None:
+        with pytest.raises(TypeError, match="non-empty string"):
+            parse_xeval_entry({"": {"param": 1}})
+
     def test_invalid_type_raises(self) -> None:
         with pytest.raises(TypeError, match="must be a string or single-key dict"):
             parse_xeval_entry(123)  # type: ignore[arg-type]
@@ -144,7 +152,8 @@ class TestAnnotateXeval:
             }
             annotate_xeval(schema)
             props = schema["properties"]
-            assert props["temp"]["x-eval-compare"] == {"numeric": {"tolerance": {"rel": 0.01}}}  # type: ignore[index]
+            expected = {"numeric": {"tolerance": {"rel": 0.01}}}
+            assert props["temp"]["x-eval-compare"] == expected  # type: ignore[index]
             assert props["name"]["x-eval-compare"] == "exact"  # type: ignore[index]
         finally:
             _BUILTIN_TYPE_DEFAULTS.clear()

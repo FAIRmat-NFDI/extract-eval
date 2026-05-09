@@ -47,6 +47,38 @@ def test_duplicate_registration_raises() -> None:
         register("dummy", dummy)
 
 
+def test_overwrite_replaces_existing() -> None:
+    def v1(gold: object, extracted: object, params: dict[str, Any]) -> ComparatorResult:
+        return ComparatorResult(score=1.0, comparator="v1")
+
+    def v2(gold: object, extracted: object, params: dict[str, Any]) -> ComparatorResult:
+        return ComparatorResult(score=0.0, comparator="v2")
+
+    register("my_comp", v1)
+    assert get_comparator("my_comp") is v1
+    register("my_comp", v2, overwrite=True)
+    assert get_comparator("my_comp") is v2
+
+
+def test_overwrite_false_raises_on_duplicate() -> None:
+    def dummy(gold: object, extracted: object, params: dict[str, Any]) -> ComparatorResult:
+        return ComparatorResult(score=1.0, comparator="dummy")
+
+    register("dup", dummy)
+    with pytest.raises(ValueError, match="already registered"):
+        register("dup", dummy, overwrite=False)
+
+
+def test_cannot_overwrite_builtin() -> None:
+    def fake(gold: object, extracted: object, params: dict[str, Any]) -> ComparatorResult:
+        return ComparatorResult(score=1.0, comparator="fake")
+
+    with pytest.raises(ValueError, match="Cannot overwrite built-in"):
+        register("exact", fake)
+    with pytest.raises(ValueError, match="Cannot overwrite built-in"):
+        register("exact", fake, overwrite=True)
+
+
 def test_builtin_exact() -> None:
     fn = get_comparator("exact")
     result = fn("hello", "hello", {})

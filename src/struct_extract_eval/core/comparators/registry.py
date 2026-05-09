@@ -32,15 +32,19 @@ def register(
     Args:
         name: Name to register under (referenced by ``x-eval-compare``).
         fn: Callable comparator (per-field or batch).
-        overwrite: If True, silently replace an existing registration.
+        overwrite: If True, silently replace an existing custom registration.
             If False (default), raises ValueError on duplicate.
+            Built-in comparators (exact, numeric, oneof) cannot be overwritten.
 
     Raises ValueError if a comparator with this name is already registered
-    and overwrite is False. Raises TypeError if fn is not callable.
+    and overwrite is False, or if the name collides with a built-in.
+    Raises TypeError if fn is not callable.
     """
     if not callable(fn):
         raise TypeError(f"Comparator must be callable, got {type(fn).__name__}")
-    if not overwrite and (name in _registry or name in _BUILTIN_COMPARATORS):
+    if name in _BUILTIN_COMPARATORS:
+        raise ValueError(f"Cannot overwrite built-in comparator '{name}'")
+    if not overwrite and name in _registry:
         raise ValueError(f"Comparator '{name}' is already registered")
     _registry[name] = fn
 
