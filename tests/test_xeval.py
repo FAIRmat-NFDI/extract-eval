@@ -29,6 +29,14 @@ class TestParseXevalEntry:
         with pytest.raises(ValueError, match="exactly one key"):
             parse_xeval_entry({"a": {}, "b": {}})
 
+    def test_empty_string_raises(self) -> None:
+        with pytest.raises(ValueError, match="non-empty string"):
+            parse_xeval_entry("")
+
+    def test_empty_dict_key_raises(self) -> None:
+        with pytest.raises(TypeError, match="non-empty string"):
+            parse_xeval_entry({"": {"param": 1}})
+
     def test_invalid_type_raises(self) -> None:
         with pytest.raises(TypeError, match="must be a string or single-key dict"):
             parse_xeval_entry(123)  # type: ignore[arg-type]
@@ -126,6 +134,27 @@ class TestAnnotateXeval:
             assert props["name"]["x-eval-compare"] == "my_custom_str"  # type: ignore[index]
             assert props["temp"]["x-eval-compare"] == "my_custom_num"  # type: ignore[index]
             assert props["active"]["x-eval-compare"] == "exact"  # type: ignore[index]
+        finally:
+            _BUILTIN_TYPE_DEFAULTS.clear()
+            _BUILTIN_TYPE_DEFAULTS.update(original)
+
+    def test_type_defaults_with_params(self) -> None:
+        """set_type_default() accepts dict form with params."""
+        original = dict(_BUILTIN_TYPE_DEFAULTS)
+        try:
+            set_type_default("number", {"numeric": {"tolerance": {"rel": 0.01}}})
+            schema: dict[str, object] = {
+                "type": "object",
+                "properties": {
+                    "temp": {"type": "number"},
+                    "name": {"type": "string"},
+                },
+            }
+            annotate_xeval(schema)
+            props = schema["properties"]
+            expected = {"numeric": {"tolerance": {"rel": 0.01}}}
+            assert props["temp"]["x-eval-compare"] == expected  # type: ignore[index]
+            assert props["name"]["x-eval-compare"] == "exact"  # type: ignore[index]
         finally:
             _BUILTIN_TYPE_DEFAULTS.clear()
             _BUILTIN_TYPE_DEFAULTS.update(original)

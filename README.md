@@ -256,6 +256,10 @@ in a record that use them and score them together in one call. Two use cases:
 Batch comparators are not registered by default. See `examples/04_example_semantic.ipynb` and
 `examples/05_example_compound.ipynb` in the examples.
 
+Use `overwrite=True` to replace an existing custom registration (e.g. in notebooks):
+`register("date", compare_date, overwrite=True)`. Built-in comparators (`exact`,
+`numeric`, `oneof`) cannot be overwritten.
+
 ---
 
 ## Transforms

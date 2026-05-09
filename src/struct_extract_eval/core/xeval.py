@@ -12,7 +12,7 @@ by both ``x-eval-transform`` and ``x-eval-compare``.
 
 from struct_extract_eval.core.json_utils import get_children, is_leaf, resolve_type
 
-_BUILTIN_TYPE_DEFAULTS: dict[str, str] = {
+_BUILTIN_TYPE_DEFAULTS: dict[str, str | dict[str, object]] = {
     "string": "exact",
     "number": "numeric",
     "integer": "numeric",
@@ -20,7 +20,9 @@ _BUILTIN_TYPE_DEFAULTS: dict[str, str] = {
 }
 
 
-def set_type_default(json_type: str, comparator: str) -> None:
+def set_type_default(
+    json_type: str, comparator: str | dict[str, object],
+) -> None:
     """Set the default comparator for a JSON type.
 
     Affects all subsequent ``annotate_xeval()`` calls. Persistent for
@@ -28,22 +30,31 @@ def set_type_default(json_type: str, comparator: str) -> None:
 
     Args:
         json_type: JSON Schema type (e.g. ``"string"``, ``"number"``).
-        comparator: Comparator name to use as default for this type.
-            Must be registered in the comparator registry before
-            ``evaluate()`` is called.
+        comparator: Comparator name (string) or comparator with params
+            (single-key dict). Uses the same two-shape rule as
+            ``x-eval-compare``. Must be registered in the comparator
+            registry before ``evaluate()`` is called.
 
-    Example::
+    Examples::
 
-        set_type_default("string", "semantic")  # all strings -> LLM judge
+        set_type_default("string", "semantic")
+        set_type_default("number", {"numeric": {"tolerance": {"rel": 0.01}}})
         annotate_xeval(schema)
     """
     if not isinstance(json_type, str) or not json_type:
         raise ValueError(
             f"json_type must be a non-empty string, got {json_type!r}"
         )
-    if not isinstance(comparator, str) or not comparator:
-        raise ValueError(
-            f"comparator must be a non-empty string, got {comparator!r}"
+    # Validate using the same two-shape rule as x-eval-compare
+    if isinstance(comparator, str):
+        if not comparator:
+            raise ValueError("comparator must be a non-empty string")
+    elif isinstance(comparator, dict):
+        parse_xeval_entry(comparator)  # validates structure
+    else:
+        raise TypeError(
+            f"comparator must be a string or single-key dict, "
+            f"got {type(comparator).__name__}"
         )
     _BUILTIN_TYPE_DEFAULTS[json_type] = comparator
 
@@ -63,6 +74,7 @@ def reset_type_defaults() -> None:
     })
 
 
+
 def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, object]]:
     """Parse the two-shape config rule into ``(function name, function params)``.
 
@@ -72,18 +84,19 @@ def parse_xeval_entry(entry: str | dict[str, object]) -> tuple[str, dict[str, ob
     Raises ``TypeError`` for invalid types, ``ValueError`` for bad structure.
     """
     if isinstance(entry, str):
+        if not entry:
+            raise ValueError("Config name must be a non-empty string")
         return entry, {}
     if isinstance(entry, dict):
         if len(entry) != 1:
             raise ValueError(
                 f"Config object must have exactly one key, got {len(entry)}: {list(entry)}"
             )
-        (name,) = entry
-        if not isinstance(name, str):
+        (name, params), = entry.items()
+        if not isinstance(name, str) or not name:
             raise TypeError(
-                f"Config key must be a string, got {type(name).__name__}: {name!r}"
+                f"Config key must be a non-empty string, got {type(name).__name__}: {name!r}"
             )
-        params = entry[name]
         if not isinstance(params, dict):
             raise ValueError(
                 f"Params for '{name}' must be a dict, got {type(params).__name__}"
