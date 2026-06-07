@@ -729,3 +729,44 @@ class TestHungarianWithBatchComparator:
         # Optimal matching: both pairs match perfectly
         assert len(matches) == 2
         assert len(mismatches) == 0
+
+
+class TestWrongTypeAcrossAlignmentStrategies:
+    """The wrong-type / missing policy (issues #56 / #82) applies to every
+    alignment strategy, not just the default ordered scorer."""
+
+    @pytest.mark.parametrize(
+        "align",
+        [
+            {"match_by": "key_field", "key": "name"},
+            {"match_by": "hungarian"},
+        ],
+    )
+    def test_extracted_wrong_type_is_mismatch(
+        self, align: dict[str, object]
+    ) -> None:
+        schema = _make_schema(_steps_schema(align))
+        results = score_record(
+            schema, {"steps": [{"name": "anneal", "temp": 500}]}, {"steps": "bad"}
+        )
+        assert len(results) == 1
+        assert results[0].path == "steps"
+        assert results[0].status == "mismatch"
+
+    @pytest.mark.parametrize(
+        "align",
+        [
+            {"match_by": "key_field", "key": "name"},
+            {"match_by": "hungarian"},
+        ],
+    )
+    def test_extracted_null_is_omission(self, align: dict[str, object]) -> None:
+        schema = _make_schema(_steps_schema(align))
+        results = score_record(
+            schema,
+            {"steps": [{"name": "anneal", "temp": 500}]},
+            {"steps": None},
+        )
+        # one gold element with two scored fields -> two omissions
+        assert len(results) == 2
+        assert all(r.status == "omission" for r in results)

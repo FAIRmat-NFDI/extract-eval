@@ -1,6 +1,6 @@
 # Struct Extract Eval
 
-Domain-agnostic, field-level evaluation for LLM structured JSON extraction.
+extract-eval gives you per-field precision/recall/F1 for LLM JSON extraction.
 
 ## Why This Package
 

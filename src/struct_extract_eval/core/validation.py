@@ -154,7 +154,8 @@ def _validate_node(
         if not isinstance(gold_value, list):
             raise GoldValidationError(
                 f"Record {record_id!r}: expected list at "
-                f"'{node.path}', got {type(gold_value).__name__}",
+                f"'{node.path}', got {type(gold_value).__name__}"
+                f" or the {node.path} type is polymorphic",
                 record_id=record_id,
                 path=node.path,
             )

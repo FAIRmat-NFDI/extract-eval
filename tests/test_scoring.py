@@ -1,5 +1,9 @@
-from struct_extract_eval.core.scoring import score_record
+import pytest
+
+from struct_extract_eval.core.comparators.comparator import ComparatorResult
+from struct_extract_eval.core.comparators.registry import _clear_registry, register
 from struct_extract_eval.core.schema import parse_eval_schema
+from struct_extract_eval.core.scoring import score_record
 from struct_extract_eval.core.xeval import annotate_xeval
 
 
@@ -443,7 +447,13 @@ class TestOrderedArray:
 
 
 class TestArrayTypeErrors:
-    """Type errors at array paths: extracted (or gold) is not a list."""
+    """Wrong container type at array paths: a value is present but not a list.
+
+    Decided behavior (issues #56 / #82): a present-but-wrong container type
+    counts as a single mismatch (penalizes precision and recall). A missing
+    value (absent key, or null) stays omission/hallucination -- a missing
+    list of N elements is N omissions. See array.md "Polymorphic fields".
+    """
 
     def _schema(self) -> "SchemaNode":  # noqa: F821
         return _make_schema({
@@ -457,44 +467,56 @@ class TestArrayTypeErrors:
         })
 
     def test_gold_list_extracted_not_list(self) -> None:
-        # gold=[a,b], extracted="bad" -> skipped (invalid extracted type)
+        # gold=[a,b], extracted="bad" -> mismatch (extracted wrong type)
         schema = self._schema()
         results = score_record(schema, {"tags": ["a", "b"]}, {"tags": "bad"})
         assert len(results) == 1
-        assert results[0].status == "skipped"
-        assert "invalid extracted type" in results[0].reason
+        assert results[0].path == "tags"
+        assert results[0].status == "mismatch"
+        assert "type mismatch" in results[0].reason
 
     def test_gold_not_list_extracted_list(self) -> None:
-        # gold="bad", extracted=[a,b] -> skipped (invalid gold type)
+        # gold="bad", extracted=[a,b] -> mismatch (symmetric, gold wrong type)
         schema = self._schema()
         results = score_record(schema, {"tags": "bad"}, {"tags": ["a", "b"]})
         assert len(results) == 1
-        assert results[0].status == "skipped"
-        assert "invalid gold type" in results[0].reason
+        assert results[0].path == "tags"
+        assert results[0].status == "mismatch"
+        assert "type mismatch" in results[0].reason
 
     def test_gold_empty_extracted_not_list(self) -> None:
-        # gold=[], extracted="bad" -> skipped (invalid extracted type)
+        # gold=[], extracted="bad" -> mismatch (extracted wrong type)
         schema = self._schema()
         results = score_record(schema, {"tags": []}, {"tags": "bad"})
         assert len(results) == 1
         assert results[0].path == "tags"
-        assert results[0].status == "skipped"
+        assert results[0].status == "mismatch"
 
     def test_gold_not_list_extracted_empty(self) -> None:
-        # gold="bad", extracted=[] -> skipped (invalid gold type)
+        # gold="bad", extracted=[] -> mismatch (gold wrong type)
         schema = self._schema()
         results = score_record(schema, {"tags": "bad"}, {"tags": []})
         assert len(results) == 1
         assert results[0].path == "tags"
-        assert results[0].status == "skipped"
+        assert results[0].status == "mismatch"
 
     def test_both_not_list(self) -> None:
-        # gold="bad", extracted="bad" -> skipped (invalid gold type)
+        # gold="bad", extracted="also_bad" -> mismatch (both wrong type, differ)
         schema = self._schema()
         results = score_record(schema, {"tags": "bad"}, {"tags": "also_bad"})
         assert len(results) == 1
         assert results[0].path == "tags"
-        assert results[0].status == "skipped"
+        assert results[0].status == "mismatch"
+
+    def test_both_not_list_but_equal_is_match(self) -> None:
+        # gold="bad", extracted="bad" -> match: the extractor reproduced gold
+        # exactly, even though both are off-shape (no comparator assigned).
+        schema = self._schema()
+        results = score_record(schema, {"tags": "bad"}, {"tags": "bad"})
+        assert len(results) == 1
+        assert results[0].path == "tags"
+        assert results[0].status == "match"
+        assert results[0].score == 1.0
 
     def test_gold_not_list_extracted_missing(self) -> None:
         # gold="bad", extracted missing -> 1 omission for the array node
@@ -511,6 +533,144 @@ class TestArrayTypeErrors:
         assert len(results) == 1
         assert results[0].path == "tags"
         assert results[0].status == "hallucination"
+
+    def test_gold_list_extracted_null(self) -> None:
+        # gold=[a,b], extracted=null -> omissions (null is "missing", scaled
+        # to data lost: a 2-element list missing -> 2 omissions)
+        schema = self._schema()
+        results = score_record(schema, {"tags": ["a", "b"]}, {"tags": None})
+        assert len(results) == 2
+        assert all(r.status == "omission" for r in results)
+
+    def test_gold_null_extracted_list(self) -> None:
+        # gold=null, extracted=[a,b] -> hallucinations
+        schema = self._schema()
+        results = score_record(schema, {"tags": None}, {"tags": ["a", "b"]})
+        assert len(results) == 2
+        assert all(r.status == "hallucination" for r in results)
+
+    def test_gold_not_list_extracted_null(self) -> None:
+        # gold="bad", extracted=null -> 1 omission (extracted absent)
+        schema = self._schema()
+        results = score_record(schema, {"tags": "bad"}, {"tags": None})
+        assert len(results) == 1
+        assert results[0].path == "tags"
+        assert results[0].status == "omission"
+
+    def test_gold_null_extracted_not_list(self) -> None:
+        # gold=null, extracted="bad" -> 1 hallucination (gold absent)
+        schema = self._schema()
+        results = score_record(schema, {"tags": None}, {"tags": "bad"})
+        assert len(results) == 1
+        assert results[0].path == "tags"
+        assert results[0].status == "hallucination"
+
+    def test_both_null(self) -> None:
+        # gold=null, extracted=null -> nothing scorable
+        schema = self._schema()
+        results = score_record(schema, {"tags": None}, {"tags": None})
+        assert results == []
+
+
+class TestObjectTypeErrors:
+    """Wrong container type at object paths.
+
+    Object nodes now share the same wrong-type / missing policy as arrays
+    (issues #56 / #82): present-but-wrong type -> mismatch (or match if the raw
+    values are equal); null -> omission/hallucination. Previously a non-dict at
+    an object path was silently coerced to {} (all omissions/hallucinations).
+    """
+
+    def _schema(self) -> "SchemaNode":  # noqa: F821
+        return _make_schema({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                },
+            },
+        })
+
+    def test_gold_dict_extracted_not_dict(self) -> None:
+        # gold={a:1}, extracted="bad" -> single mismatch (not all-omissions)
+        schema = self._schema()
+        results = score_record(schema, {"meta": {"a": "1"}}, {"meta": "bad"})
+        assert len(results) == 1
+        assert results[0].path == "meta"
+        assert results[0].status == "mismatch"
+
+    def test_gold_not_dict_extracted_dict(self) -> None:
+        # gold="bad", extracted={a:1} -> single mismatch (not all-hallucinations)
+        schema = self._schema()
+        results = score_record(schema, {"meta": "bad"}, {"meta": {"a": "1"}})
+        assert len(results) == 1
+        assert results[0].path == "meta"
+        assert results[0].status == "mismatch"
+
+    def test_both_not_dict_but_equal_is_match(self) -> None:
+        # gold="bad", extracted="bad" -> match (reproduced exactly, off-shape)
+        schema = self._schema()
+        results = score_record(schema, {"meta": "bad"}, {"meta": "bad"})
+        assert len(results) == 1
+        assert results[0].path == "meta"
+        assert results[0].status == "match"
+
+    def test_gold_dict_extracted_null(self) -> None:
+        # gold={a:1}, extracted=null -> omission for the present gold field
+        schema = self._schema()
+        results = score_record(schema, {"meta": {"a": "1"}}, {"meta": None})
+        assert len(results) == 1
+        assert results[0].path == "meta.a"
+        assert results[0].status == "omission"
+
+    def test_gold_null_extracted_dict(self) -> None:
+        # gold=null, extracted={a:1} -> hallucination for the extracted field
+        schema = self._schema()
+        results = score_record(schema, {"meta": None}, {"meta": {"a": "1"}})
+        assert len(results) == 1
+        assert results[0].path == "meta.a"
+        assert results[0].status == "hallucination"
+
+
+class TestPolymorphicObjectOrArray:
+    """A field that is sometimes an object, sometimes an array, handled by a
+    custom comparator via the escape hatch (issue #82). Element-level scoring
+    of both shapes is tracked in issue #83."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self) -> None:
+        _clear_registry()
+
+    @staticmethod
+    def _shape_aware(
+        gold: object, extracted: object, params: dict[str, object]
+    ) -> ComparatorResult:
+        # Treat equal-by-value as a match regardless of object-vs-array shape.
+        return ComparatorResult(
+            score=1.0 if gold == extracted else 0.0, comparator="shape_aware"
+        )
+
+    def test_comparator_handles_object_and_array_forms(self) -> None:
+        register("shape_aware", self._shape_aware)
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                    "x-eval-compare": "shape_aware",
+                },
+            },
+        })
+        # gold is an object, extracted is an array -> comparator owns both
+        mismatch = score_record(schema, {"body": {"a": "1"}}, {"body": ["x"]})
+        assert mismatch[0].comparator == "shape_aware"
+        assert mismatch[0].status == "mismatch"
+        # both arrays and equal -> match (no structural recursion)
+        match = score_record(schema, {"body": ["x"]}, {"body": ["x"]})
+        assert match[0].comparator == "shape_aware"
+        assert match[0].status == "match"
 
 
 # --- Transforms ---
@@ -582,6 +742,86 @@ class TestDeeplyNested:
         omissions = [r for r in results if r.status == "omission"]
         assert len(matched) == 2  # S1's id and value
         assert len(omissions) == 2  # S2's id and value
+
+
+# --- Comparator escape hatch (issue #82) ---
+
+
+class TestComparatorEscapeHatch:
+    """Explicit x-eval-compare on a container node bypasses structural scoring.
+
+    The comparator receives the whole raw value, so a polymorphic field whose
+    type varies (scalar OR list OR object) is handled by the comparator rather
+    than the object/array machinery.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean(self) -> None:
+        _clear_registry()
+
+    @staticmethod
+    def _poly(gold: object, extracted: object, params: dict[str, object]) -> ComparatorResult:
+        # Equal regardless of container type -- the comparator owns the decision.
+        return ComparatorResult(
+            score=1.0 if gold == extracted else 0.0, comparator="poly"
+        )
+
+    def test_array_node_comparator_sees_raw_scalar(self) -> None:
+        register("poly", self._poly)
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "x-eval-compare": "poly",
+                },
+            },
+        })
+        # gold is a list, extracted is a scalar: no structural skip/mismatch --
+        # the comparator decides on the raw values.
+        results = score_record(schema, {"tags": ["a"]}, {"tags": "a"})
+        assert len(results) == 1
+        assert results[0].path == "tags"
+        assert results[0].comparator == "poly"
+        assert results[0].status == "mismatch"  # raw list != raw scalar
+
+    def test_array_node_comparator_polymorphic_match(self) -> None:
+        register("poly", self._poly)
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "val": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "x-eval-compare": "poly",
+                },
+            },
+        })
+        # both scalars, equal -> the comparator returns match (no array recursion)
+        results = score_record(schema, {"val": "x"}, {"val": "x"})
+        assert len(results) == 1
+        assert results[0].comparator == "poly"
+        assert results[0].status == "match"
+
+    def test_object_node_comparator_scored_as_whole(self) -> None:
+        register("poly", self._poly)
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                    "x-eval-compare": "poly",
+                },
+            },
+        })
+        # object node handled by the comparator as a whole, not per-child
+        results = score_record(schema, {"meta": {"a": "1"}}, {"meta": {"a": "1"}})
+        assert len(results) == 1
+        assert results[0].path == "meta"
+        assert results[0].comparator == "poly"
+        assert results[0].status == "match"
 
 
 # --- Array Instance paths ---
