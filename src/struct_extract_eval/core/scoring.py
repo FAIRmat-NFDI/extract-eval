@@ -3,14 +3,15 @@
 Supports flat objects, nested objects, and arrays (ordered and unordered).
 Array alignment strategies are controlled by ``x-eval-align`` on the array
 node. Default is ordered (positional). Key-field alignment matches elements
-by a unique identifier field. Hungarian bipartite matching is planned.
+by a unique identifier field. Hungarian bipartite matching pairs elements to
+maximize total F1.
 """
 
 import logging
 
 from struct_extract_eval.batch.process import process_batches
 from struct_extract_eval.core.comparators.registry import get_comparator, is_batch
-from struct_extract_eval.core.field_result import FieldResult, FieldStatus
+from struct_extract_eval.core.field_result import FieldResult
 from struct_extract_eval.core.schema import SchemaNode
 from struct_extract_eval.core.transforms.registry import get_transform
 from struct_extract_eval.core.transforms.transform import TransformSpec
@@ -18,25 +19,94 @@ from struct_extract_eval.core.transforms.transform import TransformSpec
 logger = logging.getLogger(__name__)
 
 
-def _coerce_to_list(value: object, path: str) -> tuple[list[object], bool]:
-    """Coerce a value to a list for array scoring.
+def _score_container(
+    node: SchemaNode,
+    gold_value: object,
+    extracted_value: object,
+) -> list[FieldResult]:
+    """Score an object or array node that has no explicit comparator.
 
-    Returns ``(list, is_valid)`` where ``is_valid`` is True only if the
-    value was a real list. False means the value was coerced (None or wrong
-    type) and the caller should not treat results as reliable.
+    A container's eval config is bound to its own type: an object node carries
+    its child fields' comparators, an array node carries an items schema and an
+    alignment strategy. So the structural scorer can only run when BOTH sides
+    are that type. Otherwise we apply the shared wrong-type / missing policy
+    (issues #56 / #82) -- identical for objects and arrays.
 
-    Does not log — callers handle the is_valid=False case themselves
-    (typically by returning a skipped FieldResult with a reason).
-
-    - list: returned as-is, is_valid=True
-    - None: treated as [], is_valid=False
-    - anything else: treated as [], is_valid=False
+    A genuinely polymorphic field (e.g. sometimes an object, sometimes an
+    array) should carry an explicit ``x-eval-compare``; ``_score_node`` routes
+    that to the comparator, so it never reaches here. Element-level scoring of
+    *both* shapes would need multi-type schema support -- see issue #83.
     """
-    if isinstance(value, list):
-        return value, True
-    if value is None:
-        return [], False
-    return [], False
+    expected = dict if node.json_type == "object" else list
+    if isinstance(gold_value, expected) and isinstance(extracted_value, expected):
+        if node.json_type == "object":
+            return _score_object(node, gold_value, extracted_value)
+        return _score_array(node, gold_value, extracted_value)
+    return _score_container_type_error(node, gold_value, extracted_value, expected)
+
+
+def _score_container_type_error(
+    node: SchemaNode,
+    gold_value: object,
+    extracted_value: object,
+    expected: type,
+) -> list[FieldResult]:
+    """Wrong-type / missing policy when a container isn't the expected type.
+
+    Reached only for a container without a comparator (one with a comparator is
+    handled by ``_score_node``), so there is no comparator to consult here.
+
+    - both present, not both the expected type -> ``match`` if the raw values
+      are equal (the extractor reproduced gold exactly, even off-shape), else
+      ``mismatch``. With well-formed gold (a real container) an off-type
+      extracted value can never be equal, so this only ever rewards faithfully
+      reproducing already-off-shape gold.
+    - one side present, the other absent (``None``) -> omissions /
+      hallucinations, expanded element/field-wise when the present side IS the
+      expected type, otherwise a single node-level result.
+    - both absent -> nothing scorable.
+    """
+    gold_present = gold_value is not None
+    extracted_present = extracted_value is not None
+
+    if gold_present and extracted_present:
+        match = gold_value == extracted_value
+        return [FieldResult(
+            path=node.path,
+            score=1.0 if match else 0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="match" if match else "mismatch",
+            reason=None if match else (
+                f"type mismatch: gold {type(gold_value).__name__}, "
+                f"extracted {type(extracted_value).__name__}"
+            ),
+        )]
+
+    if gold_present:
+        if isinstance(gold_value, expected):
+            return _omission_results(node, gold_value)
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=None,
+            status="omission",
+        )]
+    if extracted_present:
+        if isinstance(extracted_value, expected):
+            return _hallucination_results(node, extracted_value)
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=None,
+            extracted_value=extracted_value,
+            status="hallucination",
+        )]
+    return []  # both absent
 
 
 def _rewrite_element_paths(
@@ -81,10 +151,10 @@ def score_record(
 ) -> list[FieldResult]:
     """Walk the SchemaNode tree, comparing gold and extracted at each field.
 
-    Returns a flat list of FieldResult entries for scored leaf fields.
-    Fields marked ``x-eval-skip`` are also included with status
-    ``"skipped"`` for visibility, but are excluded from all metric
-    calculations.
+    Returns a flat list of FieldResult entries -- mostly leaf fields, plus the
+    occasional container-level result (an empty-array match, or a container
+    type mismatch). Fields marked ``x-eval-skip`` are also included with status
+    ``"skipped"`` for visibility, but are excluded from all metric calculations.
     """
     return _score_node(schema, gold, extracted)
 
@@ -95,10 +165,17 @@ def _score_node(
     extracted_value: object,
 ) -> list[FieldResult]:
     """Recursively score a single schema node against gold and extracted values."""
-    if node.json_type == "object" and node.children:
-        return _score_object(node, gold_value, extracted_value)
-    if node.json_type == "array" and node.children:
-        return _score_array(node, gold_value, extracted_value)
+    # A node is scored structurally only when it is a container (has children)
+    # with NO explicit comparator. Everything else is scored as a single unit
+    # by its comparator via _score_leaf:
+    #   - leaves (annotate_xeval assigns a default comparator)
+    #   - skip nodes (handled inside _score_leaf)
+    #   - a container with an explicit x-eval-compare -- a polymorphic field
+    #     (issue #82): the comparator receives the whole raw value and owns
+    #     type + value, so "equal by the comparator" is a match even when the
+    #     runtime type differs from the schema type.
+    if node.children and not node.comparator.name: # do not check the node.json_type here, because the  node.json_type is just a reference, the gold determines the real type, the json_type can be wrong when the field is polymorphic.
+        return _score_container(node, gold_value, extracted_value)
     return [_score_leaf(node, gold_value, extracted_value)]
 
 
@@ -107,19 +184,14 @@ def _score_object(
     gold_value: object,
     extracted_value: object,
 ) -> list[FieldResult]:
-    """Score an object node by iterating its children."""
+    """Score an object node by iterating its children.
+
+    _score_container guarantees both sides are real dicts before dispatching.
+    """
+    assert isinstance(gold_value, dict) and isinstance(extracted_value, dict)
+    gold_dict: dict[str, object] = gold_value
+    extracted_dict: dict[str, object] = extracted_value
     results: list[FieldResult] = []
-    if not isinstance(gold_value, dict):
-        logger.warning(
-            "Expected dict at '%s', got %s in gold", node.path, type(gold_value).__name__
-        )
-    if not isinstance(extracted_value, dict):
-        logger.warning(
-            "Expected dict at '%s', got %s in extracted",
-            node.path, type(extracted_value).__name__,
-        )
-    gold_dict = gold_value if isinstance(gold_value, dict) else {}
-    extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
 
     for child in node.children:
         # Extract field name from path: "experiment.name" -> "name"
@@ -215,26 +287,11 @@ def _score_array_ordered(
     extracted_value: object,
 ) -> list[FieldResult]:
     """Score an array node using ordered (positional) matching."""
-    gold_list, gold_valid = _coerce_to_list(gold_value, node.path)
-    extracted_list, extracted_valid = _coerce_to_list(extracted_value, node.path)
+    # _score_container guarantees both sides are real lists before dispatching.
+    assert isinstance(gold_value, list) and isinstance(extracted_value, list)
+    gold_list: list[object] = gold_value
+    extracted_list: list[object] = extracted_value
     items_node = node.children[0]
-
-    # If either side was coerced, skip scoring entirely.
-    if not gold_valid or not extracted_valid:
-        reason = (
-            f"invalid gold type ({type(gold_value).__name__})"
-            if not gold_valid
-            else f"invalid extracted type ({type(extracted_value).__name__})"
-        )
-        return [FieldResult(
-            path=node.path,
-            score=0.0,
-            comparator="",
-            gold_value=gold_value,
-            extracted_value=extracted_value,
-            status="skipped",
-            reason=reason,
-        )]
 
     # Both empty lists: array-level match
     if len(gold_list) == 0 and len(extracted_list) == 0:
@@ -297,27 +354,11 @@ def _score_array_hungarian(
     """
     from struct_extract_eval.core.record import build_record_result
 
-    gold_list, gold_valid = _coerce_to_list(gold_value, node.path)
-    extracted_list, extracted_valid = _coerce_to_list(extracted_value, node.path)
+    # _score_container guarantees both sides are real lists before dispatching.
+    assert isinstance(gold_value, list) and isinstance(extracted_value, list)
+    gold_list: list[object] = gold_value
+    extracted_list: list[object] = extracted_value
     items_node = node.children[0]
-
-    # If either side was coerced (not a real list), skip scoring entirely.
-    # Return a skipped result so the invalid data doesn't produce misleading scores.
-    if not gold_valid or not extracted_valid:
-        reason = (
-            f"invalid gold type ({type(gold_value).__name__})"
-            if not gold_valid
-            else f"invalid extracted type ({type(extracted_value).__name__})"
-        )
-        return [FieldResult(
-            path=node.path,
-            score=0.0,
-            comparator="",
-            gold_value=gold_value,
-            extracted_value=extracted_value,
-            status="skipped",
-            reason=reason,
-        )]
 
     # Both actual empty lists: array-level match
     if len(gold_list) == 0 and len(extracted_list) == 0:
@@ -452,26 +493,11 @@ def _score_array_matched_by_key_field(
     are paired and scored recursively. Unmatched gold elements produce
     omissions; unmatched extracted elements produce hallucinations.
     """
-    gold_list, gold_valid = _coerce_to_list(gold_value, node.path)
-    extracted_list, extracted_valid = _coerce_to_list(extracted_value, node.path)
+    # _score_container guarantees both sides are real lists before dispatching.
+    assert isinstance(gold_value, list) and isinstance(extracted_value, list)
+    gold_list: list[object] = gold_value
+    extracted_list: list[object] = extracted_value
     items_node = node.children[0]
-
-    # If either side was coerced, skip scoring entirely.
-    if not gold_valid or not extracted_valid:
-        reason = (
-            f"invalid gold type ({type(gold_value).__name__})"
-            if not gold_valid
-            else f"invalid extracted type ({type(extracted_value).__name__})"
-        )
-        return [FieldResult(
-            path=node.path,
-            score=0.0,
-            comparator="",
-            gold_value=gold_value,
-            extracted_value=extracted_value,
-            status="skipped",
-            reason=reason,
-        )]
 
     results: list[FieldResult] = []
 

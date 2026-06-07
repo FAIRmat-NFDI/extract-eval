@@ -108,11 +108,20 @@ def _validate_node(
     """Recursively validate a gold value against a schema node."""
     if gold_value is None:
         return
+    # A node with an explicit comparator owns its value's type: the comparator
+    # handles any shape (see _score_node's escape hatch), so a polymorphic field
+    # configured with x-eval-compare is intentional and must not be flagged
+    # here. Leaves always carry a comparator and were never type-checked anyway.
+    if node.comparator.name:
+        return
     if node.json_type == "object" and node.children:
         if not isinstance(gold_value, dict):
             raise GoldValidationError(
-                f"Record {record_id!r}: expected dict at "
-                f"'{node.path}', got {type(gold_value).__name__}",
+                f"Record {record_id!r}: expected a dict at '{node.path}', got "
+                f"{type(gold_value).__name__}. If this field is intentionally "
+                f"polymorphic (its type varies across records), add an "
+                f"x-eval-compare comparator on '{node.path}' to score it; "
+                f"otherwise the gold value is malformed.",
                 record_id=record_id,
                 path=node.path,
             )
@@ -153,8 +162,11 @@ def _validate_node(
     elif node.json_type == "array" and node.children:
         if not isinstance(gold_value, list):
             raise GoldValidationError(
-                f"Record {record_id!r}: expected list at "
-                f"'{node.path}', got {type(gold_value).__name__}",
+                f"Record {record_id!r}: expected a list at '{node.path}', got "
+                f"{type(gold_value).__name__}. If this field is intentionally "
+                f"polymorphic (its type varies across records), add an "
+                f"x-eval-compare comparator on '{node.path}' to score it; "
+                f"otherwise the gold value is malformed.",
                 record_id=record_id,
                 path=node.path,
             )

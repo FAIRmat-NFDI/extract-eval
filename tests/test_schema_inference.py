@@ -31,6 +31,41 @@ class TestInferSchema:
         schema = infer_schema([{"x": None}, {"x": None}])
         assert schema["properties"]["x"] == {"type": "string"}
 
+    def test_warns_on_polymorphic_field(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A field that is a string in one record and a list in another is
+        # polymorphic. infer_schema picks the first instance's type but warns
+        # so the polymorphism is surfaced (issue #82).
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            schema = infer_schema([{"f": "x"}, {"f": ["a", "b"]}])
+        # type still inferred from the first non-null instance
+        assert schema["properties"]["f"]["type"] == "string"
+        assert "polymorphic" in caplog.text.lower()
+        assert "f" in caplog.text
+
+    def test_no_polymorphic_warning_for_int_and_float(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # int and float are the same numeric family -- the numeric comparator
+        # handles 5 vs 5.0, so this is NOT flagged as polymorphic.
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            infer_schema([{"n": 1}, {"n": 2.5}])
+        assert "polymorphic" not in caplog.text.lower()
+
+    def test_no_polymorphic_warning_for_consistent_type(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            infer_schema([{"s": "a"}, {"s": "b"}])
+        assert "polymorphic" not in caplog.text.lower()
+
     def test_nested_object(self) -> None:
         schema = infer_schema([{"outer": {"inner": "val"}}])
         outer = schema["properties"]["outer"]
