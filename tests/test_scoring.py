@@ -872,7 +872,11 @@ class TestArrayInstancePaths:
         assert results[1].path == "tags[1]"  # omission
         assert results[2].path == "tags[2]"  # omission
 
-    def test_hallucinations_have_indices(self) -> None:
+    def test_hallucinations_have_unique_negative_indices(self) -> None:
+        # Hallucinated elements (no gold counterpart) get distinct negative
+        # indices counting down (-1, -2, ...), mirroring how omitted/matched
+        # elements use gold's positive indices. This keeps each hallucinated
+        # element distinct in per-field aggregation and parent-path grouping.
         schema = _make_schema({
             "type": "object",
             "properties": {
@@ -881,8 +885,35 @@ class TestArrayInstancePaths:
         })
         results = score_record(schema, {"tags": ["a"]}, {"tags": ["a", "b", "c"]})
         assert results[0].path == "tags[0]"  # match
-        assert results[1].path == "tags[-1]"  # hallucination (no gold counterpart)
-        assert results[2].path == "tags[-1]"  # hallucination (no gold counterpart)
+        assert results[1].path == "tags[-1]"  # 1st hallucination
+        assert results[2].path == "tags[-2]"  # 2nd hallucination
+
+    def test_hallucinated_objects_do_not_collide(self) -> None:
+        # Two hallucinated object elements must not share a parent path (which
+        # would merge their fields in aggregation / compound grouping).
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "temp": {"type": "number"},
+                        },
+                    },
+                },
+            },
+        })
+        results = score_record(
+            schema,
+            {"steps": []},
+            {"steps": [{"name": "a", "temp": 1}, {"name": "b", "temp": 2}]},
+        )
+        paths = sorted(r.path for r in results)
+        assert paths == ["steps[-1].name", "steps[-1].temp", "steps[-2].name", "steps[-2].temp"]
+        assert all(r.status == "hallucination" for r in results)
 
     def test_nested_arrays_both_levels_have_indices(self) -> None:
         """layers[0].steps[1].temp -- each array level gets its own index."""
