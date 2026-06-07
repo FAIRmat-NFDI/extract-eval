@@ -770,3 +770,25 @@ class TestWrongTypeAcrossAlignmentStrategies:
         # one gold element with two scored fields -> two omissions
         assert len(results) == 2
         assert all(r.status == "omission" for r in results)
+
+
+def test_key_field_hallucinations_get_unique_negative_indices() -> None:
+    # Two unmatched extracted elements (no gold counterpart) must get distinct
+    # negative indices, even across key-field's two hallucination sources.
+    schema = _make_schema(_steps_schema({"match_by": "key_field", "key": "name"}))
+    gold = {"steps": [{"name": "anneal", "temp": 500}]}
+    extracted = {
+        "steps": [
+            {"name": "anneal", "temp": 500},   # matched
+            {"name": "etch", "temp": 200},      # unmatched by key -> halluc
+            {"temp": 999},                       # missing key -> halluc (other source)
+        ]
+    }
+    results = score_record(schema, gold, extracted)
+    halluc_paths = sorted(r.path for r in results if r.status == "hallucination")
+    # etch -> name+temp, the keyless element -> temp; distinct negative indices
+    assert "steps[-1].name" in halluc_paths
+    assert "steps[-2].temp" in halluc_paths
+    # no two hallucinated elements share an index
+    indices = {r.path.split(".")[0] for r in results if r.status == "hallucination"}
+    assert indices == {"steps[-1]", "steps[-2]"}

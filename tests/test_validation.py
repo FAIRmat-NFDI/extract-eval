@@ -81,7 +81,7 @@ class TestValidateGold:
                 },
             },
         })
-        with pytest.raises(GoldValidationError, match="expected dict"):
+        with pytest.raises(GoldValidationError, match="expected a dict"):
             validate_gold([{"experiment": "not a dict"}], schema)
 
     def test_array_field_wrong_type_raises(self) -> None:
@@ -94,7 +94,7 @@ class TestValidateGold:
                 },
             },
         })
-        with pytest.raises(GoldValidationError, match="expected list"):
+        with pytest.raises(GoldValidationError, match="expected a list"):
             validate_gold([{"tags": "not a list"}], schema)
 
     def test_null_object_field_does_not_raise(self) -> None:

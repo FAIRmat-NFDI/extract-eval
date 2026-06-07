@@ -174,7 +174,12 @@ def _score_node(
     #     (issue #82): the comparator receives the whole raw value and owns
     #     type + value, so "equal by the comparator" is a match even when the
     #     runtime type differs from the schema type.
-    if node.children and not node.comparator.name: # do not check the node.json_type here, because the  node.json_type is just a reference, the gold determines the real type, the json_type can be wrong when the field is polymorphic.
+    #
+    # We intentionally gate on node.children, not node.json_type: json_type is
+    # only a reference (it can be wrong for a polymorphic field), while the
+    # actual gold/extracted values determine the real type inside
+    # _score_container.
+    if node.children and not node.comparator.name:
         return _score_container(node, gold_value, extracted_value)
     return [_score_leaf(node, gold_value, extracted_value)]
 
@@ -319,12 +324,14 @@ def _score_array_ordered(
         _rewrite_element_paths(element_results, items_node.path, i)
         results.extend(element_results)
 
-    # Extra extracted elements: hallucinations
-    # Index -1: these elements have no gold counterpart.
+    # Extra extracted elements: hallucinations. Negative indices count down
+    # (-1, -2, ...) so each has no gold counterpart yet stays distinct.
+    halluc_index = -1
     for i in range(matched_count, len(extracted_list)):
         element_results = _hallucination_results(items_node, extracted_list[i])
-        _rewrite_element_paths(element_results, items_node.path, -1)
+        _rewrite_element_paths(element_results, items_node.path, halluc_index)
         results.extend(element_results)
+        halluc_index -= 1
 
     return results
 
@@ -386,10 +393,12 @@ def _score_array_hungarian(
 
     # One side empty: no matching needed, just omissions/hallucinations
     if n == 0:
-        for idx, elem in enumerate(extracted_list):
+        halluc_index = -1
+        for elem in extracted_list:
             element_results = _hallucination_results(items_node, elem)
-            _rewrite_element_paths(element_results, items_node.path, -1)
+            _rewrite_element_paths(element_results, items_node.path, halluc_index)
             results.extend(element_results)
+            halluc_index -= 1
         return results
     if m == 0:
         for idx, elem in enumerate(gold_list):
@@ -470,12 +479,14 @@ def _score_array_hungarian(
             _rewrite_element_paths(element_results, items_node.path, i)
             results.extend(element_results)
 
-    # Unmatched extracted -> hallucinations
+    # Unmatched extracted -> hallucinations (distinct negative indices).
+    halluc_index = -1
     for j in range(m):
         if j not in matched_ext:
             element_results = _hallucination_results(items_node, extracted_list[j])
-            _rewrite_element_paths(element_results, items_node.path, -1)
+            _rewrite_element_paths(element_results, items_node.path, halluc_index)
             results.extend(element_results)
+            halluc_index -= 1
 
     return results
 
@@ -595,20 +606,26 @@ def _score_array_matched_by_key_field(
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
 
-    # Unmatched extracted elements (key not in gold) — hallucinations
-    # Index -1: these elements have no gold counterpart.
+    # Hallucinations (no gold counterpart) get distinct negative indices
+    # counting down. Both sources below share one counter so every hallucinated
+    # element in this array has a unique path.
+    halluc_index = -1
+
+    # Unmatched extracted elements (key not in gold).
     for k, elem in extracted_by_key.items():
         if k not in matched_keys:
             element_results = _hallucination_results(items_node, elem)
-            _rewrite_element_paths(element_results, items_node.path, -1)
+            _rewrite_element_paths(element_results, items_node.path, halluc_index)
             results.extend(element_results)
+            halluc_index -= 1
 
     # Extracted elements without the key field or with
-    # unhashable/duplicate keys — hallucinations
+    # unhashable/duplicate keys.
     for elem in extracted_unmatched:
         element_results = _hallucination_results(items_node, elem)
-        _rewrite_element_paths(element_results, items_node.path, -1)
+        _rewrite_element_paths(element_results, items_node.path, halluc_index)
         results.extend(element_results)
+        halluc_index -= 1
 
     return results
 
