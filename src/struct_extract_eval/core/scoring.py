@@ -174,7 +174,7 @@ def _score_node(
     #     (issue #82): the comparator receives the whole raw value and owns
     #     type + value, so "equal by the comparator" is a match even when the
     #     runtime type differs from the schema type.
-    if node.children and not node.comparator.name:
+    if node.children and not node.comparator.name: # do not check the node.json_type here, because the  node.json_type is just a reference, the gold determines the real type, the json_type can be wrong when the field is polymorphic.
         return _score_container(node, gold_value, extracted_value)
     return [_score_leaf(node, gold_value, extracted_value)]
 
