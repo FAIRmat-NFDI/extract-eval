@@ -372,9 +372,9 @@ class TestOrderedArray:
         assert len(results) == 3
         assert all(r.status == "omission" for r in results)
         assert all(r.score == 0 for r in results)
-        # One omission per missing element, reported at the synthetic items path "tags[]"
-        # rather than the array node path "tags".
-        assert all(r.path == "tags[]" for r in results)
+        # One omission per missing element, indexed by gold position -- the same
+        # instance paths a present array would use (not the bare schema path tags[]).
+        assert [r.path for r in results] == ["tags[0]", "tags[1]", "tags[2]"]
 
 
     def test_missing_array_in_gold_produces_hallucinations(self) -> None:
@@ -391,6 +391,33 @@ class TestOrderedArray:
         results = score_record(schema, {}, {"tags": ["a", "b", "c"]})
         assert len(results) == 3
         assert all(r.status == "hallucination" for r in results)
+        # Distinct negative indices (no gold counterpart), matching a present array.
+        assert [r.path for r in results] == ["tags[-1]", "tags[-2]", "tags[-3]"]
+
+    def test_missing_array_of_objects_indexes_each_element(self) -> None:
+        # A fully-missing array of objects indexes each element distinctly
+        # (steps[0].name, steps[1].name) instead of merging them at steps[].
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "temp": {"type": "number"},
+                        },
+                    },
+                },
+            },
+        })
+        gold = {"steps": [{"name": "a", "temp": 1}, {"name": "b", "temp": 2}]}
+        results = score_record(schema, gold, {})
+        assert sorted(r.path for r in results) == [
+            "steps[0].name", "steps[0].temp", "steps[1].name", "steps[1].temp",
+        ]
+        assert all(r.status == "omission" for r in results)
 
     def test_empty_gold_array_missing_extracted_is_omission(self) -> None:
         # gold has [], extracted is missing the field: 1 omission for the array node.
