@@ -705,9 +705,11 @@ def _omission_results(node: SchemaNode, gold_value: object = None) -> list[Field
     Can be called on any node, not just leaves. For object nodes, recurses
     only into children that are actually PRESENT in the gold dict -- you
     can't omit a field that gold didn't have.
-    For array nodes, emits one omission per gold element; if the gold array
-    is empty (or a non-list coerced to empty) while extracted is missing the
-    field entirely, emits a single omission for the array node itself.
+    For array nodes, emits one omission per gold element at its indexed
+    instance path (``tags[0]``, ``tags[1]``, ...), matching how a present
+    array's elements are indexed. If the gold array is empty (or a non-list
+    coerced to empty) while extracted is missing the field entirely, emits a
+    single omission for the array node itself.
     """
     if node.skip:
         return []
@@ -744,9 +746,14 @@ def _omission_results(node: SchemaNode, gold_value: object = None) -> list[Field
                 extracted_value=None,
                 status="omission",
             )]
+        # Index each element by its gold position so a fully-missing array's
+        # omissions use the same instance paths (tags[0], tags[1], ...) as a
+        # present array's, instead of all sharing the schema path tags[].
         item_results: list[FieldResult] = []
-        for elem in gold_list:
-            item_results.extend(_omission_results(items_node, elem))
+        for idx, elem in enumerate(gold_list):
+            elem_results = _omission_results(items_node, elem)
+            _rewrite_element_paths(elem_results, items_node.path, idx)
+            item_results.extend(elem_results)
         return item_results
     return [FieldResult(
         path=node.path,
@@ -764,10 +771,11 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
     Can be called on any node, not just leaves. For object nodes, recurses
     only into children that are actually PRESENT in the extracted dict --
     you can't hallucinate a field the extractor didn't produce.
-    For array nodes, emits one hallucination per extracted element; if the
-    extracted array is empty (or a non-list coerced to empty) while gold is
-    missing the field entirely, emits a single hallucination for the array
-    node itself.
+    For array nodes, emits one hallucination per extracted element at a
+    distinct negative instance path (``tags[-1]``, ``tags[-2]``, ...), matching
+    how a present array's extra elements are indexed. If the extracted array is
+    empty (or a non-list coerced to empty) while gold is missing the field
+    entirely, emits a single hallucination for the array node itself.
     """
     if node.skip:
         return []
@@ -808,9 +816,15 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
                 extracted_value=extracted_value,
                 status="hallucination",
             )]
+        # Distinct negative indices (no gold counterpart), mirroring how a
+        # present array's extra elements are indexed (tags[-1], tags[-2], ...).
         item_results: list[FieldResult] = []
+        halluc_index = -1
         for elem in extracted_list:
-            item_results.extend(_hallucination_results(items_node, elem))
+            elem_results = _hallucination_results(items_node, elem)
+            _rewrite_element_paths(elem_results, items_node.path, halluc_index)
+            item_results.extend(elem_results)
+            halluc_index -= 1
         return item_results
     return [FieldResult(
         path=node.path,
