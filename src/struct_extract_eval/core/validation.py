@@ -3,11 +3,14 @@
 ``validate_gold(gold, schema, ...)``
     Validates gold data against an eval schema. Raises ``GoldValidationError``
     on:
-    - Type errors (string where dict expected, etc.)
     - Extra fields in gold that are not in the schema (all gold fields must
       be defined in the eval schema)
 
-    Optionally warns about:
+    Warns about (does not raise):
+    - Container type mismatches (a dict/list expected by the schema's
+      ``json_type`` but gold has another type). ``json_type`` is only a hint --
+      a field may be polymorphic -- so this is not treated as an error; the
+      scorer compares the value as-is. See ``_score_node``.
     - Fields in the schema that are missing from a gold record (``warn_missing``)
 
 Schema validation is handled by ``parse_eval_schema()`` in ``core/schema.py``.
@@ -17,6 +20,7 @@ Run before evaluation so issues surface early.
 """
 
 import logging
+
 from struct_extract_eval.core.schema import SchemaNode, parse_eval_schema
 
 logger = logging.getLogger(__name__)
@@ -42,13 +46,17 @@ def validate_gold(
 ) -> None:
     """Validate gold data against an eval schema.
 
-    Always checks (raises ``GoldValidationError``):
-    - Type errors: string where dict expected, integer where list expected
+    Raises ``GoldValidationError`` on:
     - Extra fields: field present in gold but not defined in schema. All gold
       fields must be in the eval schema. If a field shouldn't be scored, add
       it to the schema with ``x-eval-skip: true``.
 
-    Optionally warns about (configurable):
+    Warns about (does not raise):
+    - Container type mismatch: gold isn't the dict/list the schema's
+      ``json_type`` declares. ``json_type`` is a hint, not a constraint -- the
+      field may be polymorphic -- so the scorer compares the value as-is
+      (a type difference becomes a mismatch unless an ``x-eval-compare``
+      comparator handles it). Fix the gold if it is actually malformed.
     - ``warn_missing``: field defined in schema but absent from a gold record.
       These fields will be ignored during scoring for that record (not an
       omission -- omission only happens when gold has a field and extracted
@@ -66,8 +74,7 @@ def validate_gold(
         warn_missing: Warn when a schema field is absent from a gold record.
 
     Raises:
-        GoldValidationError: if a gold value has the wrong type, or if gold
-            contains fields not defined in the schema.
+        GoldValidationError: if gold contains fields not defined in the schema.
         SchemaError: if the schema itself is invalid (checked first).
     """
     tree = parse_eval_schema(schema)
@@ -116,15 +123,17 @@ def _validate_node(
         return
     if node.json_type == "object" and node.children:
         if not isinstance(gold_value, dict):
-            raise GoldValidationError(
-                f"Record {record_id!r}: expected a dict at '{node.path}', got "
-                f"{type(gold_value).__name__}. If this field is intentionally "
-                f"polymorphic (its type varies across records), add an "
-                f"x-eval-compare comparator on '{node.path}' to score it; "
-                f"otherwise the gold value is malformed.",
-                record_id=record_id,
-                path=node.path,
+            # json_type is a hint, not a constraint: the field may be
+            # polymorphic, so this is a warning, not an error. The scorer
+            # compares the value as-is. Can't validate children of a non-dict.
+            logger.warning(
+                "Record %r: gold at '%s' is %s, not the schema's 'object' "
+                "type. Treated as a hint (the field may be polymorphic); the "
+                "scorer compares it as-is. Add an custom x-eval-compare comparator on "
+                "'%s', or fix the gold if it is malformed.",
+                record_id, node.path, type(gold_value).__name__, node.path,
             )
+            return
 
         schema_fields: set[str] = set()
         for child in node.children:
@@ -161,15 +170,15 @@ def _validate_node(
 
     elif node.json_type == "array" and node.children:
         if not isinstance(gold_value, list):
-            raise GoldValidationError(
-                f"Record {record_id!r}: expected a list at '{node.path}', got "
-                f"{type(gold_value).__name__}. If this field is intentionally "
-                f"polymorphic (its type varies across records), add an "
-                f"x-eval-compare comparator on '{node.path}' to score it; "
-                f"otherwise the gold value is malformed.",
-                record_id=record_id,
-                path=node.path,
+            # json_type is a hint, not a constraint (see the object branch).
+            logger.warning(
+                "Record %r: gold at '%s' is %s, not the schema's 'array' "
+                "type. Treated as a hint (the field may be polymorphic); the "
+                "scorer compares it as-is. Add an x-eval-compare comparator on "
+                "'%s' to silence this, or fix the gold if it is malformed.",
+                record_id, node.path, type(gold_value).__name__, node.path,
             )
+            return
         items_node = node.children[0]
         for item in gold_value:
             _validate_node(

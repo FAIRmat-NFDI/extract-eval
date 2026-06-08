@@ -69,7 +69,13 @@ class TestValidateGold:
             [{"steps": [{"name": "a", "temp": 300}]}], schema
         )
 
-    def test_object_field_wrong_type_raises(self) -> None:
+    def test_object_field_wrong_type_warns_not_raises(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # json_type is a hint: a wrong-typed gold container warns (the field
+        # may be polymorphic) rather than raising. The scorer compares as-is.
+        import logging
+
         schema = _eval_schema({
             "type": "object",
             "properties": {
@@ -81,10 +87,16 @@ class TestValidateGold:
                 },
             },
         })
-        with pytest.raises(GoldValidationError, match="expected a dict"):
-            validate_gold([{"experiment": "not a dict"}], schema)
+        with caplog.at_level(logging.WARNING):
+            validate_gold([{"experiment": "not a dict"}], schema)  # no raise
+        assert "experiment" in caplog.text
+        assert "object" in caplog.text
 
-    def test_array_field_wrong_type_raises(self) -> None:
+    def test_array_field_wrong_type_warns_not_raises(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
         schema = _eval_schema({
             "type": "object",
             "properties": {
@@ -94,8 +106,10 @@ class TestValidateGold:
                 },
             },
         })
-        with pytest.raises(GoldValidationError, match="expected a list"):
-            validate_gold([{"tags": "not a list"}], schema)
+        with caplog.at_level(logging.WARNING):
+            validate_gold([{"tags": "not a list"}], schema)  # no raise
+        assert "tags" in caplog.text
+        assert "array" in caplog.text
 
     def test_null_object_field_does_not_raise(self) -> None:
         schema = _eval_schema({
