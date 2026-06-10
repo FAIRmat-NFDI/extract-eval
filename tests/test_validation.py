@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from struct_extract_eval.core.validation import GoldValidationError, validate_gold
@@ -225,23 +227,27 @@ class TestListValuedType:
         validate_gold([{"q": "35 nm"}], schema)
         validate_gold([{"q": {"value": 35}}], schema)
 
-    def test_multi_type_undeclared_shape_warns_not_raises(self, caplog) -> None:  # type: ignore[no-untyped-def]
+    def test_multi_type_undeclared_shape_warns_not_raises(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         schema = _eval_schema({
             "type": "object",
             "properties": {"q": {"type": ["string", "object"]}},
         })
-        with caplog.at_level("WARNING"):
+        with caplog.at_level(logging.WARNING):
             validate_gold([{"q": [1, 2]}], schema)  # array not declared
         assert any("not one of the declared types" in r.message for r in caplog.records)
 
 
 class TestStrictTypes:
-    def test_strict_off_by_default_only_warns(self, caplog) -> None:  # type: ignore[no-untyped-def]
+    def test_strict_off_by_default_only_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         schema = _eval_schema({
             "type": "object",
             "properties": {"x": {"type": "object", "properties": {"k": {"type": "string"}}}},
         })
-        with caplog.at_level("WARNING"):
+        with caplog.at_level(logging.WARNING):
             validate_gold([{"x": "not an object"}], schema)  # no raise (default lenient)
 
     def test_strict_leaf_type_mismatch_raises(self) -> None:

@@ -176,9 +176,7 @@ def _validate_node(
     # default `exact` comparator).
     if node.allowed_types is not None:
         actual = _value_type(gold_value)
-        if actual not in node.allowed_types and not (
-            actual == "integer" and "number" in node.allowed_types
-        ):
+        if not any(_type_matches(actual, d) for d in node.allowed_types):
             logger.warning(
                 "Record %r: gold at '%s' is %s, not one of the declared types "
                 "%s. The field's comparator will compare it as-is.",
