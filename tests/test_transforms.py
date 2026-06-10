@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import pytest
 
@@ -10,7 +11,7 @@ from struct_extract_eval.core.transforms.builtins import (
     transform_strip,
     transform_type_convert,
 )
-
+from struct_extract_eval.core.transforms.transform import Transform
 
 # --- lowercase ---
 
@@ -240,8 +241,8 @@ def test_type_convert_unconvertible_raises() -> None:
         (transform_type_convert, {"to": "float"}),
     ],
 )
-def test_builtin_transform_none_is_noop(transform: object, params: dict) -> None:
-    assert transform(None, params) is None  # type: ignore[operator]
+def test_builtin_transform_none_is_noop(transform: Transform, params: dict[str, Any]) -> None:
+    assert transform(None, params) is None
 
 
 def test_apply_transforms_passes_none_to_custom_transform() -> None:
@@ -250,9 +251,10 @@ def test_apply_transforms_passes_none_to_custom_transform() -> None:
     from struct_extract_eval.core.transforms.registry import _clear_registry, register
     from struct_extract_eval.core.transforms.transform import TransformSpec
 
-    def none_to_empty(value: object, params: dict) -> object:
+    def none_to_empty(value: object, params: dict[str, Any]) -> object:
         return "" if value is None else value
 
+    _clear_registry()  # hermetic: ensure no leftover registration collides
     try:
         register("none_to_empty", none_to_empty)
         result = _apply_transforms(None, [TransformSpec(name="none_to_empty", params={})])
