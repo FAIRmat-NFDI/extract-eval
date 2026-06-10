@@ -3,6 +3,8 @@ from typing import Any
 
 
 def transform_lowercase(value: Any, params: dict[str, Any]) -> Any:
+    if value is None:
+        return None
     if not isinstance(value, str):
         raise TypeError(f"lowercase transform requires a string, got {type(value).__name__}")
     return value.lower()
@@ -10,6 +12,8 @@ def transform_lowercase(value: Any, params: dict[str, Any]) -> Any:
 
 def transform_strip(value: Any, params: dict[str, Any]) -> Any:
     """Strip leading/trailing whitespace."""
+    if value is None:
+        return None
     if not isinstance(value, str):
         raise TypeError(f"strip transform requires a string, got {type(value).__name__}")
     return value.strip()
@@ -17,6 +21,8 @@ def transform_strip(value: Any, params: dict[str, Any]) -> Any:
 
 def transform_normalize_whitespace(value: Any, params: dict[str, Any]) -> Any:
     """Collapse multiple spaces/newlines to a single space, strip leading/trailing whitespace."""
+    if value is None:
+        return None
     if not isinstance(value, str):
         raise TypeError(
             f"normalize_whitespace transform requires a string, got {type(value).__name__}"
@@ -26,6 +32,8 @@ def transform_normalize_whitespace(value: Any, params: dict[str, Any]) -> Any:
 
 def transform_sort_tokens(value: Any, params: dict[str, Any]) -> Any:
     """Alphabetize whitespace-separated tokens."""
+    if value is None:
+        return None
     if not isinstance(value, str):
         raise TypeError(
             f"sort_tokens transform requires a string, got {type(value).__name__}"
@@ -38,6 +46,8 @@ def transform_round_digits(value: Any, params: dict[str, Any]) -> Any:
 
     Params: {"digits": int}
     """
+    if value is None:
+        return None
     if not isinstance(value, (int, float)):
         raise TypeError(
             f"round_digits transform requires a number, got {type(value).__name__}"
@@ -91,6 +101,8 @@ def transform_type_convert(value: Any, params: dict[str, Any]) -> Any:
 
     Params: {"to": "float" | "int" | "str" | "bool"}
     """
+    if value is None:
+        return None
     if "to" not in params:
         raise TypeError("type_convert transform requires 'to' parameter")
     target = params["to"]
