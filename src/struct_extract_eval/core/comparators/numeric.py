@@ -11,6 +11,15 @@ def compare_numeric(gold: Any, extracted: Any, params: dict[str, Any]) -> Compar
     If no tolerance is specified, defaults to exact float equality.
     if both rel and abs are specified, both conditions must be satisfied for score=1.0
     """
+    # allow both None as correct, otherwise type error. Mirrors the NaN
+    # policy below: identical "no value" on both sides is a match, but a
+    # value-vs-None disagreement is not. Checked before float() since
+    # float(None) raises.
+    if gold is None or extracted is None:
+        if gold is None and extracted is None:
+            return ComparatorResult(score=1.0, comparator="numeric")
+        return ComparatorResult(score=0.0, comparator="numeric", reason="type_error")
+
     try:
         gold_f = float(gold)
         extracted_f = float(extracted)

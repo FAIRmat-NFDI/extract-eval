@@ -66,6 +66,23 @@ def test_nan_one_side() -> None:
     assert result.reason == "type_error"
 
 
+def test_none_both() -> None:
+    """Both None should match -- identical values, mirrors the NaN policy."""
+    result = compare_numeric(None, None, {})
+    assert result.score == 1.0
+
+
+def test_none_one_side() -> None:
+    """One None, one number should be type_error."""
+    result = compare_numeric(None, 42.0, {})
+    assert result.score == 0.0
+    assert result.reason == "type_error"
+
+    result = compare_numeric(42.0, None, {})
+    assert result.score == 0.0
+    assert result.reason == "type_error"
+
+
 def test_string_numbers() -> None:
     """Numeric strings should be castable."""
     result = compare_numeric("42.5", "42.5", {})
