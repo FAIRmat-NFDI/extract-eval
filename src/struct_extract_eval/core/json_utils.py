@@ -25,9 +25,6 @@ def load_schema(path: str | Path) -> dict[str, object]:
     return raw
 
 
-# Sentinel json_type for a node whose `type` is a list of >= 2 non-null types.
-# Such a node is scored as a single unit by its comparator (default `exact`),
-# not structurally. The actual types are kept in SchemaNode.allowed_types.
 MULTI_TYPE = "multi"
 
 
@@ -42,7 +39,7 @@ def resolve_type(schema: dict[str, object]) -> str | None:
     """Return the effective JSON Schema type, or None if absent.
 
     JSON Schema allows `type` to be a list. We reduce it:
-    - drop "null" (nullable is handled by value presence, not type)
+    - drop "nuxll" (nullable is handled by value presence, not type)
     - exactly one type left -> that type (e.g. ["string", "null"] -> "string")
     - two or more left -> ``MULTI_TYPE`` (a comparator-owned multi-type node;
       see ``get_children`` and ``SchemaNode.allowed_types``)
