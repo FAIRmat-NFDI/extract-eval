@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import pytest
 
@@ -10,7 +11,7 @@ from struct_extract_eval.core.transforms.builtins import (
     transform_strip,
     transform_type_convert,
 )
-
+from struct_extract_eval.core.transforms.transform import Transform
 
 # --- lowercase ---
 
@@ -221,3 +222,42 @@ def test_type_convert_invalid_target_raises() -> None:
 def test_type_convert_unconvertible_raises() -> None:
     with pytest.raises(TypeError, match="Cannot convert"):
         transform_type_convert("not_a_number", {"to": "float"})
+
+
+# --- None handling ---
+# Built-in transforms are None-safe: they no-op on None (return None) instead
+# of raising, so a sometimes-null field with a string/number transform does not
+# crash the scoring chain. A non-None wrong type still raises.
+
+
+@pytest.mark.parametrize(
+    "transform, params",
+    [
+        (transform_lowercase, {}),
+        (transform_strip, {}),
+        (transform_normalize_whitespace, {}),
+        (transform_sort_tokens, {}),
+        (transform_round_digits, {"digits": 2}),
+        (transform_type_convert, {"to": "float"}),
+    ],
+)
+def test_builtin_transform_none_is_noop(transform: Transform, params: dict[str, Any]) -> None:
+    assert transform(None, params) is None
+
+
+def test_apply_transforms_passes_none_to_custom_transform() -> None:
+    """_apply_transforms must hand None to transforms so they can rewrite it."""
+    from struct_extract_eval.core.scoring import _apply_transforms
+    from struct_extract_eval.core.transforms.registry import _clear_registry, register
+    from struct_extract_eval.core.transforms.transform import TransformSpec
+
+    def none_to_empty(value: object, params: dict[str, Any]) -> object:
+        return "" if value is None else value
+
+    _clear_registry()  # hermetic: ensure no leftover registration collides
+    try:
+        register("none_to_empty", none_to_empty)
+        result = _apply_transforms(None, [TransformSpec(name="none_to_empty", params={})])
+        assert result == ""
+    finally:
+        _clear_registry()

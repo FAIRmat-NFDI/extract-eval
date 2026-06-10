@@ -690,8 +690,14 @@ def _score_leaf(
 
 
 def _apply_transforms(value: object, transforms: list[TransformSpec]) -> object:
-    """Apply a chain of transforms to a value. Skip if value is None."""
-    if value is None or not transforms:
+    """Apply a chain of transforms to a value.
+
+    None is passed through to the transforms like any other value -- a transform
+    decides for itself what None means (the built-ins no-op on None; a custom
+    transform may rewrite it, e.g. None -> ""). This is what lets the transform
+    layer normalize nulls.
+    """
+    if not transforms:
         return value
     for spec in transforms:
         fn = get_transform(spec.name)
