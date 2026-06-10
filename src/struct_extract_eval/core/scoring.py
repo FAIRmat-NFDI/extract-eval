@@ -198,6 +198,19 @@ def _score_object(
     extracted_dict: dict[str, object] = extracted_value
     results: list[FieldResult] = []
 
+    # Both empty objects: object-level match, mirroring the empty-array case
+    # ([] vs [] -> match). Without this, the property loop below scores nothing
+    # (every field is absent on both sides), so the agreement would be invisible.
+    if len(gold_dict) == 0 and len(extracted_dict) == 0:
+        return [FieldResult(
+            path=node.path,
+            score=1.0,
+            comparator="",
+            gold_value={},
+            extracted_value={},
+            status="match",
+        )]
+
     for child in node.children:
         # Extract field name from path: "experiment.name" -> "name"
         field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
