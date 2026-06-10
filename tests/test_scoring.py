@@ -250,6 +250,24 @@ class TestNestedObject:
         assert len(results) == 2
         assert all(r.status == "omission" for r in results)
 
+    def test_empty_objects_match(self) -> None:
+        # {} vs {} is one match for the object node itself, mirroring empty
+        # arrays ([] vs [] -> match). Both sides agree there are no fields.
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "type": "object",
+                    "properties": {"author": {"type": "string"}},
+                },
+            },
+        })
+        results = score_record(schema, {"meta": {}}, {"meta": {}})
+        assert len(results) == 1
+        assert results[0].path == "meta"
+        assert results[0].status == "match"
+        assert results[0].score == 1.0
+
 
 # --- Ordered arrays ---
 
