@@ -10,6 +10,7 @@ from struct_extract_eval.core.schema import (
     parse_eval_schema,
 )
 from struct_extract_eval.core.transforms.transform import TransformSpec
+from struct_extract_eval.core.xeval import annotate_xeval
 
 # --- SchemaError ---
 
@@ -502,3 +503,53 @@ def _root_child(schema: dict[str, object], name: str) -> SchemaNode:
         if child.path == name:
             return child
     raise AssertionError(f"Child '{name}' not found in {[c.path for c in root.children]}")
+
+
+class TestListValuedType:
+    """JSON Schema allows `type` to be a list of types."""
+
+    @staticmethod
+    def _tree(raw: dict[str, object]) -> SchemaNode:
+        annotate_xeval(raw)
+        return parse_eval_schema(raw)
+
+    def test_nullable_list_resolves_to_single_type(self) -> None:
+        # ["string", "null"] is just a nullable string -- collapses to "string".
+        tree = self._tree({
+            "type": "object",
+            "properties": {"name": {"type": ["string", "null"]}},
+        })
+        node = tree.children[0]
+        assert node.json_type == "string"
+        assert node.allowed_types is None
+        assert node.comparator.name == "exact"
+
+    def test_multi_type_defaults_to_exact_and_is_a_leaf(self) -> None:
+        # >= 2 non-null types -> comparator-owned leaf, default comparator exact.
+        tree = self._tree({
+            "type": "object",
+            "properties": {
+                "q": {
+                    "type": ["string", "object"],
+                    "properties": {"value": {"type": "number"}},
+                },
+            },
+        })
+        node = tree.children[0]
+        assert node.allowed_types == ["string", "object"]
+        assert node.children == []            # not scored structurally
+        assert node.comparator.name == "exact"   # default, regardless of first type
+
+    def test_multi_type_default_exact_even_when_first_type_numeric(self) -> None:
+        tree = self._tree({
+            "type": "object",
+            "properties": {"x": {"type": ["number", "string"]}},
+        })
+        assert tree.children[0].comparator.name == "exact"
+
+    def test_multi_type_explicit_comparator_wins(self) -> None:
+        tree = self._tree({
+            "type": "object",
+            "properties": {"x": {"type": ["string", "object"], "x-eval-compare": "exact"}},
+        })
+        assert tree.children[0].comparator.name == "exact"

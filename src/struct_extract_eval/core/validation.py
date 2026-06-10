@@ -26,6 +26,23 @@ from struct_extract_eval.core.schema import SchemaNode, parse_eval_schema
 logger = logging.getLogger(__name__)
 
 
+def _value_type(value: object) -> str:
+    """JSON Schema type name of a Python value (bool before int)."""
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return "null"
+
+
 class GoldValidationError(Exception):
     """Raised when gold data has a structural issue."""
 
@@ -114,6 +131,22 @@ def _validate_node(
 ) -> None:
     """Recursively validate a gold value against a schema node."""
     if gold_value is None:
+        return
+    # Multi-type node (`type` was a list of >= 2 non-null types): gold may be
+    # any of the declared types. Warn only if it is none of them; the field's
+    # comparator scores it as-is regardless. Checked before the comparator
+    # short-circuit so the union check still runs (multi-type nodes carry a
+    # default `exact` comparator).
+    if node.allowed_types is not None:
+        actual = _value_type(gold_value)
+        if actual not in node.allowed_types and not (
+            actual == "integer" and "number" in node.allowed_types
+        ):
+            logger.warning(
+                "Record %r: gold at '%s' is %s, not one of the declared types "
+                "%s. The field's comparator will compare it as-is.",
+                record_id, node.path, actual, node.allowed_types,
+            )
         return
     # A node with an explicit comparator owns its value's type: the comparator
     # handles any shape (see _score_node's escape hatch), so a polymorphic field

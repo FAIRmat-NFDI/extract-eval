@@ -25,12 +25,37 @@ def load_schema(path: str | Path) -> dict[str, object]:
     return raw
 
 
+# Sentinel json_type for a node whose `type` is a list of >= 2 non-null types.
+# Such a node is scored as a single unit by its comparator (default `exact`),
+# not structurally. The actual types are kept in SchemaNode.allowed_types.
+MULTI_TYPE = "multi"
+
+
+def _non_null_types(type_value: object) -> list[str]:
+    """Non-null type strings from a list-valued `type` (drops "null")."""
+    if not isinstance(type_value, list):
+        return []
+    return [t for t in type_value if isinstance(t, str) and t != "null"]
+
+
 def resolve_type(schema: dict[str, object]) -> str | None:
     """Return the effective JSON Schema type, or None if absent.
+
+    JSON Schema allows `type` to be a list. We reduce it:
+    - drop "null" (nullable is handled by value presence, not type)
+    - exactly one type left -> that type (e.g. ["string", "null"] -> "string")
+    - two or more left -> ``MULTI_TYPE`` (a comparator-owned multi-type node;
+      see ``get_children`` and ``SchemaNode.allowed_types``)
     """
     t = schema.get("type")
     if isinstance(t, str):
         return t
+    if isinstance(t, list):
+        non_null = _non_null_types(t)
+        if len(non_null) == 1:
+            return non_null[0]
+        if len(non_null) >= 2:
+            return MULTI_TYPE
     return None
 
 
@@ -54,7 +79,13 @@ def get_children(
     - For objects: one entry per property. ``field_name`` is the property key.
     - For arrays: a single entry for ``items``. ``field_name`` is ``"[]"``.
     - For leaves: empty list.
+    - For a multi-type node (``type`` is a list of >= 2 non-null types): empty
+      list -- it is scored as one unit by its comparator, not structurally,
+      even if it also declares ``properties``/``items``.
     """
+    if len(_non_null_types(schema.get("type"))) >= 2:
+        return []
+
     children: list[tuple[str, dict[str, object], str]] = []
 
     props = schema.get("properties")

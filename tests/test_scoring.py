@@ -1105,3 +1105,44 @@ class TestSkipFields:
         scored = [r for r in results if r.status != "skipped"]
         assert len(scored) == 1
         assert scored[0].path == "name"
+
+
+class TestListValuedType:
+    def test_multi_type_default_exact_match(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {"q": {"type": ["string", "object"],
+                                  "properties": {"value": {"type": "number"}}}},
+        })
+        # identical objects -> exact match
+        results = score_record(schema, {"q": {"value": 1}}, {"q": {"value": 1}})
+        assert len(results) == 1
+        assert results[0].path == "q"
+        assert results[0].status == "match"
+
+    def test_multi_type_default_exact_cross_shape_mismatch(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {"q": {"type": ["string", "object"],
+                                  "properties": {"value": {"type": "number"}}}},
+        })
+        # string vs object -> exact mismatch (default coarse behavior)
+        results = score_record(schema, {"q": "x"}, {"q": {"value": 1}})
+        assert len(results) == 1
+        assert results[0].status == "mismatch"
+
+    def test_multi_type_custom_comparator(self) -> None:
+        def cmp_loose(gold: object, extracted: object, params: dict[str, object]) -> ComparatorResult:
+            return ComparatorResult(score=1.0, comparator="loose")
+
+        register("loose", cmp_loose)
+        try:
+            schema = _make_schema({
+                "type": "object",
+                "properties": {"q": {"type": ["string", "object"],
+                                     "x-eval-compare": "loose"}},
+            })
+            results = score_record(schema, {"q": "x"}, {"q": {"value": 1}})
+            assert results[0].status == "match"
+        finally:
+            _clear_registry()

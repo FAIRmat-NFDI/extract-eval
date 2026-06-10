@@ -212,3 +212,24 @@ class TestValidateGold:
             schema,
             id_field="doi",
         )
+
+
+class TestListValuedType:
+    def test_multi_type_gold_any_declared_shape_ok(self) -> None:
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {"q": {"type": ["string", "object"],
+                                 "properties": {"value": {"type": "number"}}}},
+        })
+        # gold as string and as object are both fine -- no raise
+        validate_gold([{"q": "35 nm"}], schema)
+        validate_gold([{"q": {"value": 35}}], schema)
+
+    def test_multi_type_undeclared_shape_warns_not_raises(self, caplog) -> None:  # type: ignore[no-untyped-def]
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {"q": {"type": ["string", "object"]}},
+        })
+        with caplog.at_level("WARNING"):
+            validate_gold([{"q": [1, 2]}], schema)  # array not declared
+        assert any("not one of the declared types" in r.message for r in caplog.records)
