@@ -26,6 +26,34 @@ from struct_extract_eval.core.schema import SchemaNode, parse_eval_schema
 logger = logging.getLogger(__name__)
 
 
+def _value_type(value: object) -> str:
+    """JSON Schema type name of a Python value (bool before int)."""
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return "null"
+
+
+def _type_matches(actual: str, declared: str) -> bool:
+    """Whether a value's type satisfies a declared JSON Schema type.
+
+    ``integer`` and ``number`` are treated as interchangeable so a valid numeric
+    value (e.g. ``5`` for a ``number`` field) is not flagged.
+    """
+    if actual == declared:
+        return True
+    return actual in ("integer", "number") and declared in ("integer", "number")
+
+
 class GoldValidationError(Exception):
     """Raised when gold data has a structural issue."""
 
@@ -43,6 +71,7 @@ def validate_gold(
     schema: dict[str, object],
     id_field: str | None = None,
     warn_missing: bool = True,
+    strict_types: bool = False,
 ) -> None:
     """Validate gold data against an eval schema.
 
@@ -72,9 +101,17 @@ def validate_gold(
         schema: Eval schema (resolved schema with x-eval-* annotations).
         id_field: Field name to use as record ID. Defaults to integer index.
         warn_missing: Warn when a schema field is absent from a gold record.
+        strict_types: Off by default (type is a hint -- mismatches only warn).
+            When True, every node's gold value must match the schema-declared
+            type, or be one of the declared types when ``type`` is a list, or be
+            ``null``; otherwise a ``GoldValidationError`` is raised. Use with
+            hand-written schemas where the declared types are a real constraint;
+            leave off for inferred schemas (where the type is only a hint) and
+            for fields whose comparator deliberately coerces types.
 
     Raises:
-        GoldValidationError: if gold contains fields not defined in the schema.
+        GoldValidationError: if gold contains fields not defined in the schema,
+            or (when ``strict_types``) a gold value is not a declared type.
         SchemaError: if the schema itself is invalid (checked first).
     """
     tree = parse_eval_schema(schema)
@@ -102,7 +139,7 @@ def validate_gold(
             record_id: str | int = raw_id
         else:
             record_id = i
-        _validate_node(tree, g, record_id, warn_missing, ignore_keys)
+        _validate_node(tree, g, record_id, warn_missing, ignore_keys, strict_types)
 
 
 def _validate_node(
@@ -111,9 +148,40 @@ def _validate_node(
     record_id: str | int,
     warn_missing: bool,
     ignore_keys: set[str] | None = None,
+    strict: bool = False,
 ) -> None:
     """Recursively validate a gold value against a schema node."""
     if gold_value is None:
+        return
+    # Strict mode: the gold value's type must match the schema-declared type
+    # (or be one of them for a multi-type node). null is exempt (handled above).
+    # Raises before the lenient warnings below, and applies to every node.
+    if strict:
+        actual = _value_type(gold_value)
+        declared = (
+            node.allowed_types if node.allowed_types is not None else [node.json_type]
+        )
+        if not any(_type_matches(actual, d) for d in declared):
+            raise GoldValidationError(
+                f"Record {record_id!r}: gold at '{node.path}' is {actual}, not "
+                f"the schema-declared type {declared} (strict_types=True; only "
+                f"the declared type(s) and null are allowed).",
+                record_id=record_id,
+                path=node.path,
+            )
+    # Multi-type node (`type` was a list of >= 2 non-null types): gold may be
+    # any of the declared types. Warn only if it is none of them; the field's
+    # comparator scores it as-is regardless. Checked before the comparator
+    # short-circuit so the union check still runs (multi-type nodes carry a
+    # default `exact` comparator).
+    if node.allowed_types is not None:
+        actual = _value_type(gold_value)
+        if not any(_type_matches(actual, d) for d in node.allowed_types):
+            logger.warning(
+                "Record %r: gold at '%s' is %s, not one of the declared types "
+                "%s. The field's comparator will compare it as-is.",
+                record_id, node.path, actual, node.allowed_types,
+            )
         return
     # A node with an explicit comparator owns its value's type: the comparator
     # handles any shape (see _score_node's escape hatch), so a polymorphic field
@@ -146,7 +214,7 @@ def _validate_node(
             if field_name in gold_value:
                 _validate_node(
                     child, gold_value[field_name], record_id,
-                    warn_missing,
+                    warn_missing, strict=strict,
                 )
             elif warn_missing:
                 logger.warning(
@@ -182,5 +250,5 @@ def _validate_node(
         items_node = node.children[0]
         for item in gold_value:
             _validate_node(
-                items_node, item, record_id, warn_missing,
+                items_node, item, record_id, warn_missing, strict=strict,
             )

@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from struct_extract_eval.core.validation import GoldValidationError, validate_gold
@@ -212,3 +214,79 @@ class TestValidateGold:
             schema,
             id_field="doi",
         )
+
+
+class TestListValuedType:
+    def test_multi_type_gold_any_declared_shape_ok(self) -> None:
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {"q": {"type": ["string", "object"],
+                                 "properties": {"value": {"type": "number"}}}},
+        })
+        # gold as string and as object are both fine -- no raise
+        validate_gold([{"q": "35 nm"}], schema)
+        validate_gold([{"q": {"value": 35}}], schema)
+
+    def test_multi_type_undeclared_shape_warns_not_raises(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {"q": {"type": ["string", "object"]}},
+        })
+        with caplog.at_level(logging.WARNING):
+            validate_gold([{"q": [1, 2]}], schema)  # array not declared
+        assert any("not one of the declared types" in r.message for r in caplog.records)
+
+
+class TestStrictTypes:
+    def test_strict_off_by_default_only_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {"x": {"type": "object", "properties": {"k": {"type": "string"}}}},
+        })
+        with caplog.at_level(logging.WARNING):
+            validate_gold([{"x": "not an object"}], schema)  # no raise (default lenient)
+
+    def test_strict_leaf_type_mismatch_raises(self) -> None:
+        schema = _eval_schema({"type": "object", "properties": {"name": {"type": "string"}}})
+        with pytest.raises(GoldValidationError, match="not the schema-declared type"):
+            validate_gold([{"name": 42}], schema, strict_types=True)
+
+    def test_strict_container_type_mismatch_raises(self) -> None:
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {"x": {"type": "object", "properties": {"k": {"type": "string"}}}},
+        })
+        with pytest.raises(GoldValidationError):
+            validate_gold([{"x": "not an object"}], schema, strict_types=True)
+
+    def test_strict_multi_type_must_be_one_of_list(self) -> None:
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {"q": {"type": ["string", "object"]}},
+        })
+        validate_gold([{"q": "ok"}], schema, strict_types=True)        # string -> ok
+        validate_gold([{"q": {"a": 1}}], schema, strict_types=True)    # object -> ok
+        with pytest.raises(GoldValidationError):
+            validate_gold([{"q": [1, 2]}], schema, strict_types=True)  # array -> not declared
+
+    def test_strict_null_allowed(self) -> None:
+        schema = _eval_schema({"type": "object", "properties": {"name": {"type": "string"}}})
+        validate_gold([{"name": None}], schema, strict_types=True)  # null exempt, no raise
+
+    def test_strict_integer_ok_for_number_field(self) -> None:
+        schema = _eval_schema({"type": "object", "properties": {"t": {"type": "number"}}})
+        validate_gold([{"t": 5}], schema, strict_types=True)  # int satisfies number
+
+    def test_strict_correct_types_pass(self) -> None:
+        schema = _eval_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+        })
+        validate_gold([{"name": "a", "tags": ["x", "y"]}], schema, strict_types=True)

@@ -58,6 +58,9 @@ class SchemaNode:
     transforms: list[TransformSpec] = field(default_factory=list)
     # Array-only. None for leaf and object nodes.
     align: dict[str, object] | None = None
+    # Set when `type` was a list of >= 2 non-null types (json_type is MULTI_TYPE).
+    # The non-null types the value may take. None otherwise.
+    allowed_types: list[str] | None = None
 
 
 def _validate_xeval(schema: dict[str, object], path: str) -> None:
@@ -277,6 +280,13 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
     if json_type is None:
         raise SchemaError("Missing or invalid 'type'", path)
 
+    raw_type = schema.get("type")
+    allowed_types: list[str] | None = None
+    if isinstance(raw_type, list):
+        non_null = [t for t in raw_type if isinstance(t, str) and t != "null"]
+        if len(non_null) >= 2:
+            allowed_types = non_null
+
     comparator = _resolve_comparator_spec(schema, path)
     transforms = _resolve_transform_specs(schema, path)
 
@@ -291,6 +301,7 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
         comparator=comparator,
         children=children,
         transforms=transforms,
+        allowed_types=allowed_types,
     )
     if schema.get("x-eval-skip"):
         node.skip = True
