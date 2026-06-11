@@ -39,7 +39,7 @@ def resolve_type(schema: dict[str, object]) -> str | None:
     """Return the effective JSON Schema type, or None if absent.
 
     JSON Schema allows `type` to be a list. We reduce it:
-    - drop "nuxll" (nullable is handled by value presence, not type)
+    - drop "null" (nullable is handled by value presence, not type)
     - exactly one type left -> that type (e.g. ["string", "null"] -> "string")
     - two or more left -> ``MULTI_TYPE`` (a comparator-owned multi-type node;
       see ``get_children`` and ``SchemaNode.allowed_types``)
