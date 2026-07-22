@@ -17,7 +17,12 @@ from struct_extract_eval.core.comparators.registry import (
     ComparatorNotFoundError,
     get_comparator,
 )
-from struct_extract_eval.core.json_utils import get_children, is_leaf, resolve_type
+from struct_extract_eval.core.json_utils import (
+    get_children,
+    is_leaf,
+    non_null_types,
+    resolve_type,
+)
 from struct_extract_eval.core.transforms.registry import (
     TransformNotFoundError,
     get_transform,
@@ -280,12 +285,8 @@ def _build_node(schema: dict[str, object], path: str) -> SchemaNode:
     if json_type is None:
         raise SchemaError("Missing or invalid 'type'", path)
 
-    raw_type = schema.get("type")
-    allowed_types: list[str] | None = None
-    if isinstance(raw_type, list):
-        non_null = [t for t in raw_type if isinstance(t, str) and t != "null"]
-        if len(non_null) >= 2:
-            allowed_types = non_null
+    non_null = non_null_types(schema.get("type"))
+    allowed_types: list[str] | None = non_null if len(non_null) >= 2 else None
 
     comparator = _resolve_comparator_spec(schema, path)
     transforms = _resolve_transform_specs(schema, path)

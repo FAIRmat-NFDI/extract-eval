@@ -182,6 +182,9 @@ for path, agg in result.per_field.items():
           f"mismatches={agg.mismatches}  omissions={agg.omissions}")
 ```
 
+For more details, please check examples in `examples/`.
+
+
 ---
 
 ## Comparators
@@ -321,6 +324,14 @@ Config syntax: both `x-eval-compare` and `x-eval-transform` entries use the same
 - String: `"exact"` (no parameters)
 - Single-key dict: `{"numeric": {"tolerance": {"rel": 0.01}}}` (with parameters, value must be a dict)
 
+### Field types (`type`)
+
+`type` may be a single string or a **list** (JSON Schema allows both):
+
+- `{"type": "string"}` -- a normal single-type field.
+- `{"type": ["string", "null"]}` -- nullable; the `null` is dropped, so this is just a `string` field (null is handled by value presence, not type).
+- `{"type": ["string", "object"]}` -- a **polymorphic** field that may take several shapes. It is scored as one value by its comparator (default `exact`; set `x-eval-compare` to a custom comparator that understands all the shapes). It is not scored structurally even if it also declares `properties`/`items`. See `examples/08_example_polymorphic.ipynb`.
+
 ---
 
 ## Results
@@ -390,7 +401,7 @@ Step-by-step Jupyter notebooks in `examples/`:
 | `set_type_default(json_type, comparator)` | Change the default comparator for a JSON type |
 | `reset_type_defaults()` | Reset type-defaults mapping to built-in defaults |
 | `parse_eval_schema(schema)` | Parse and validate eval schema, returns SchemaNode tree |
-| `validate_gold(gold, schema, ...)` | Validate gold against schema (type errors, extra-field errors, missing-field warnings) |
+| `validate_gold(gold, schema, ..., strict_types=False)` | Validate gold against schema (extra-field errors; type mismatches warn by default, or raise when `strict_types=True`) |
 | `evaluate(gold, extracted, schema)` | Evaluate gold vs extracted using a reviewed eval schema |
 | `register(name, fn, overwrite=False)` | Register a custom comparator |
 ---
