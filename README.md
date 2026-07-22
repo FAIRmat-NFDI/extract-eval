@@ -265,7 +265,9 @@ Use `overwrite=True` to replace an existing custom registration (e.g. in noteboo
 ## Transforms
 
 Preprocess both gold and extracted values before comparison. Chained left to right.
-Skipped when value is `null`.
+Transforms receive every value, including `null`: the built-ins below no-op on
+`null` (return it unchanged), while a custom transform may rewrite it (e.g.
+`null` -> `""`).
 
 | Transform | Params | What it does |
 |-----------|--------|-------------|
@@ -274,6 +276,7 @@ Skipped when value is `null`.
 | `normalize_whitespace` | -- | Collapse multiple spaces/newlines to single space |
 | `sort_tokens` | -- | Alphabetize whitespace-separated tokens |
 | `round_digits` | `{"digits": int}` | Round numeric value to N decimal places |
+| `type_convert` | `{"to": "float"\|"int"\|"str"\|"bool"}` | Convert value to the given type |
 
 Schema: `"x-eval-transform": ["strip", "lowercase"]`
 
