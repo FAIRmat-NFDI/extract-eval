@@ -1,6 +1,9 @@
+import logging
+
 import pytest
 
 from struct_extract_eval.core.schema import (
+    collapse_multi_type_anyof,
     get_node_at_path,
     infer_schema,
     merge_all_of,
@@ -332,6 +335,103 @@ class TestRemoveNullAnyOf:
         assert cleaned["properties"]["tags"]["items"] == {"type": "string"}
 
 
+class TestCollapseMultiTypeAnyOf:
+    def test_collapses_multiple_typed_branches_to_type_list(self) -> None:
+        schema = {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert collapsed == {"type": ["string", "integer"]}
+
+    def test_preserves_sibling_keys(self) -> None:
+        schema = {
+            "description": "a quantity",
+            "x-eval-compare": "exact",
+            "anyOf": [{"type": "string"}, {"type": "number"}],
+        }
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert collapsed == {
+            "description": "a quantity",
+            "x-eval-compare": "exact",
+            "type": ["string", "number"],
+        }
+
+    def test_flattens_list_valued_branch_types(self) -> None:
+        schema = {
+            "anyOf": [
+                {"type": ["string", "number"]},
+                {"type": "boolean"},
+            ],
+        }
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert collapsed == {"type": ["string", "number", "boolean"]}
+
+    def test_drops_branch_structure_and_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        schema = {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {"value": {"type": "number"}},
+                },
+                {"type": "string"},
+            ],
+        }
+
+        with caplog.at_level(
+            logging.WARNING, logger="struct_extract_eval.core.schema.inference"
+        ):
+            collapsed = collapse_multi_type_anyof(schema)
+
+        assert collapsed == {"type": ["object", "string"]}
+        assert any("dropped" in record.message for record in caplog.records)
+
+    def test_keeps_anyof_when_branches_share_a_single_type(self) -> None:
+        # Two object shapes: a list-valued type can't distinguish them, so the
+        # anyOf is kept (and will fail at parse time, per the resolve warning).
+        schema = {
+            "anyOf": [
+                {"type": "object", "properties": {"a": {"type": "string"}}},
+                {"type": "object", "properties": {"b": {"type": "number"}}},
+            ],
+        }
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert "anyOf" in collapsed
+        assert "type" not in collapsed
+
+    def test_keeps_anyof_when_a_branch_has_no_type(self) -> None:
+        schema = {
+            "anyOf": [
+                {"enum": [1, 2, 3]},
+                {"type": "string"},
+            ],
+        }
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert "anyOf" in collapsed
+        assert "type" not in collapsed
+
+    def test_processes_nested_dicts(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "quantity": {"anyOf": [{"type": "string"}, {"type": "number"}]},
+            },
+        }
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert collapsed["properties"]["quantity"] == {"type": ["string", "number"]}
+
+
 class TestResolveSchemaReferences:
     def test_resolves_refs_merges_allof_and_removes_defs(self) -> None:
         schema = {
@@ -374,6 +474,33 @@ class TestResolveSchemaReferences:
         assert resolved["type"] == "object"
         assert resolved["properties"]["property"] == {"type": "string"}
         assert resolved["properties"]["value"] == {"type": "number"}
+
+    def test_collapses_ref_union_to_type_list(self) -> None:
+        # pydantic emits Union[Measurement, str, None] as
+        # anyOf: [$ref, {"type": "string"}, {"type": "null"}]. The ref is only
+        # expanded mid-resolve, so this exercises the post-ref collapse pass.
+        schema = {
+            "$defs": {
+                "Measurement": {
+                    "type": "object",
+                    "properties": {"value": {"type": "number"}},
+                },
+            },
+            "type": "object",
+            "properties": {
+                "quantity": {
+                    "anyOf": [
+                        {"$ref": "#/$defs/Measurement"},
+                        {"type": "string"},
+                        {"type": "null"},
+                    ],
+                },
+            },
+        }
+
+        resolved = resolve_schema_references(schema)
+
+        assert resolved["properties"]["quantity"] == {"type": ["object", "string"]}
 
     def test_does_not_mutate_input(self) -> None:
         schema = {

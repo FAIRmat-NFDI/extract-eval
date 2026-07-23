@@ -196,11 +196,98 @@ def remove_null_anyof(schema: dict[str, Any] | list[Any]) -> Any:
     return schema
 
 
+# Branch keys that are safe to lose when an anyOf collapses to a list-valued
+# type -- they carry no structure or constraints.
+_COLLAPSE_IGNORED_KEYS = frozenset({"type", "description", "title"})
+
+
+def _collapse_to_type_list(branches: list[Any], path: str) -> list[str] | None:
+    """Reduce anyOf branches to a flat list of JSON type names, if possible.
+
+    Returns None when a branch has no usable ``type`` (e.g. an unresolved
+    ``$ref`` or a bare ``enum``) or when fewer than two distinct non-null
+    types remain (e.g. two object shapes) -- the caller keeps the anyOf then.
+    """
+    types: list[str] = []
+    for branch in branches:
+        if not isinstance(branch, dict):
+            return None
+        branch_type = branch.get("type")
+        if isinstance(branch_type, str):
+            branch_types = [branch_type]
+        elif isinstance(branch_type, list) and all(
+            isinstance(t, str) for t in branch_type
+        ):
+            branch_types = branch_type
+        else:
+            return None
+        types.extend(t for t in branch_types if t != "null")
+
+    deduped = list(dict.fromkeys(types))
+    if len(deduped) < 2:
+        return None
+
+    dropped_keys = sorted(
+        {
+            key
+            for branch in branches
+            for key in branch
+            if key not in _COLLAPSE_IGNORED_KEYS
+        }
+    )
+    if dropped_keys:
+        logger.warning(
+            "anyOf at '%s' collapsed to multi-type %s; branch keys %s were "
+            "dropped. The field is scored as one unit by its comparator "
+            "(assign x-eval-compare), not structurally.",
+            path or "<root>", deduped, dropped_keys,
+        )
+    return deduped
+
+
+def collapse_multi_type_anyof(
+    schema: dict[str, Any] | list[Any], path: str = "",
+) -> Any:
+    """Recursively collapse anyOf lists of typed branches to a list-valued type.
+
+    ``anyOf: [{"type": "string"}, {"type": "number"}]`` becomes
+    ``type: ["string", "number"]`` -- a comparator-owned multi-type node
+    (see issue #82). Branch keys beyond ``type`` (``properties``, ``enum``,
+    ...) are dropped with a warning: a multi-type node is scored as one unit
+    by its comparator, not structurally.
+
+    The anyOf is kept as-is when a branch has no usable ``type`` (e.g. an
+    unresolved ``$ref``) or when fewer than two distinct non-null types
+    remain (e.g. two object shapes) -- so run this only after ``$ref`` and
+    ``allOf`` resolution, when branches carry their real types.
+
+    ``path`` labels the node in warnings.
+    """
+    if isinstance(schema, dict):
+        anyOf = schema.get("anyOf")
+        if isinstance(anyOf, list):
+            collapsed = _collapse_to_type_list(anyOf, path)
+            if collapsed is not None:
+                schema.pop("anyOf")
+                schema["type"] = collapsed
+        return {
+            k: collapse_multi_type_anyof(v, f"{path}.{k}" if path else k)
+            for k, v in schema.items()
+        }
+    elif isinstance(schema, list):
+        return [
+            collapse_multi_type_anyof(i, f"{path}[{index}]")
+            for index, i in enumerate(schema)
+        ]
+    return schema
+
+
 def resolve_schema_references(schema: dict[str, Any]) -> Any:
     """Resolve a JSON schema into a simplified form for evaluation.
 
-    Replaces ``$ref`` references, merges ``allOf`` lists, removes
-    ``anyOf: [type, null]`` wrappers, and drops ``$defs``.
+    Replaces ``$ref`` references, merges ``allOf`` lists, simplifies
+    ``anyOf`` lists (null branches removed; multiple non-null typed branches
+    collapse to a list-valued ``type``), and drops ``$defs``.
 
     Warns about JSON Schema keywords that are not handled:
 
@@ -216,14 +303,21 @@ def resolve_schema_references(schema: dict[str, Any]) -> Any:
     schema = remove_null_anyof(schema)
     schema = dict(jsonref.replace_refs(schema, jsonschema=True, proxies=False))
     schema = merge_all_of(schema)
+    # After ref/allOf resolution: every anyOf branch that can carry a `type`
+    # now does (a branch that was `{"$ref": ...}` had none before), so the
+    # remaining anyOf lists can collapse to a list-valued `type`.
+    schema = collapse_multi_type_anyof(schema)
     schema.pop("$defs", None)
     return json.loads(json.dumps(schema))
 
 
 _RESOLVE_WARNING = """\
-resolve_schema_references handles $ref, allOf, and anyOf[type, null].
+resolve_schema_references handles $ref, allOf, anyOf[type, null], and anyOf
+with multiple non-null types (collapsed to a list-valued `type` -- a
+comparator-owned multi-type field; branch properties/items are dropped).
 The following are NOT handled:
   - oneOf: type info lost, field has no 'type' key -> SchemaError at parse time
-  - anyOf with multiple non-null types: same as oneOf
+  - anyOf whose branches share one type (e.g. two object shapes) or lack a
+    'type' key: anyOf is kept -> SchemaError at parse time
   - if/then/else: conditional properties lost -- may cause SchemaError or silently miss fields
 For schemas with these keywords, use infer_schema(instances) instead."""

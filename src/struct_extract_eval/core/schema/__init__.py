@@ -9,6 +9,7 @@ Modules:
 """
 
 from struct_extract_eval.core.schema.inference import (
+    collapse_multi_type_anyof,
     infer_schema,
     merge_all_of,
     remove_null_anyof,
@@ -45,6 +46,7 @@ __all__ = [
     "SchemaError",
     "SchemaNode",
     "annotate_xeval",
+    "collapse_multi_type_anyof",
     "get_children",
     "get_leaf_paths",
     "get_node_at_path",
