@@ -2,7 +2,7 @@
 
 from struct_extract_eval.postprocess import NullHandling, reclassify_nulls
 from struct_extract_eval.core.field_result import FieldResult
-from struct_extract_eval.core.xeval import annotate_xeval
+from struct_extract_eval.core.schema import annotate_xeval
 from struct_extract_eval.evaluator import evaluate
 
 

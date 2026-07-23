@@ -1,4 +1,4 @@
-from struct_extract_eval.core.json_utils import (
+from struct_extract_eval.core.schema.utils import (
     get_children,
     get_node_at_path,
     is_leaf,
