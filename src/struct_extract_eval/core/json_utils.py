@@ -28,7 +28,7 @@ def load_schema(path: str | Path) -> dict[str, object]:
 MULTI_TYPE = "multi"
 
 
-def _non_null_types(type_value: object) -> list[str]:
+def non_null_types(type_value: object) -> list[str]:
     """Non-null type strings from a list-valued `type` (drops "null")."""
     if not isinstance(type_value, list):
         return []
@@ -48,7 +48,7 @@ def resolve_type(schema: dict[str, object]) -> str | None:
     if isinstance(t, str):
         return t
     if isinstance(t, list):
-        non_null = _non_null_types(t)
+        non_null = non_null_types(t)
         if len(non_null) == 1:
             return non_null[0]
         if len(non_null) >= 2:
@@ -68,6 +68,7 @@ def get_children(
 ) -> list[tuple[str, dict[str, object], str]]:
     """Return immediate children of a resolved schema's node given a path.
 
+    get ``schema``'s children. ``path`` is the path of ``schema`` itself.
     Returns a list of ``(field_name, child_schema, child_path)`` tuples.
 
     - For objects: one entry per property. ``field_name`` is the property key.
@@ -77,7 +78,7 @@ def get_children(
       list -- it is scored as one unit by its comparator, not structurally,
       even if it also declares ``properties``/``items``.
     """
-    if len(_non_null_types(schema.get("type"))) >= 2:
+    if len(non_null_types(schema.get("type"))) >= 2:
         return []
 
     children: list[tuple[str, dict[str, object], str]] = []
