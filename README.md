@@ -43,6 +43,43 @@ pip install -e ".[dev,methodology]"    # + IAA, contamination, shift detection
 
 Requires Python >= 3.10.
 
+## Quick Start
+
+```python
+from struct_extract_eval import evaluate, infer_schema, annotate_xeval, parse_eval_schema, validate_gold
+
+gold = [
+    {"method": "sputtering", "temperature": 300, "lab_id": "A1"},
+    {"method": "evaporation", "temperature": 450, "lab_id": "B2"},
+]
+extracted = [
+    {"method": "sputtering", "temperature": 301, "lab_id": "A1"},
+    {"method": "evaporation", "temperature": 460, "lab_id": "B3"},
+]
+
+# 1. Infer schema from gold, add eval defaults
+eval_schema = infer_schema(gold)
+annotate_xeval(eval_schema)
+
+# 2. Review and customize eval_schema (edit x-eval-* keys)
+
+# 3. Validate gold against eval_schema to catch errors and omissions
+# and parse schema to ensure no errors before evaluation.
+parse_eval_schema(eval_schema)
+validate_gold(gold, eval_schema)
+
+# 4. Evaluate
+result = evaluate(gold, extracted, schema=eval_schema)
+print(f"F1: {result.mean_f1:.2f}")
+print(f"Precision: {result.mean_precision:.2f}")
+print(f"Recall: {result.mean_recall:.2f}")
+
+for path, agg in result.per_field.items():
+    print(f"  {path}: score={agg.mean_score:.2f}  matches={agg.matches}  "
+          f"mismatches={agg.mismatches}  omissions={agg.omissions}")
+```
+
+For more details, please check examples in `examples/`.
 ---
 
 ## Key Concepts
@@ -145,47 +182,6 @@ the schema.
 
 ---
 
-## Quick Start
-
-```python
-from struct_extract_eval import evaluate, infer_schema, annotate_xeval, parse_eval_schema, validate_gold
-
-gold = [
-    {"method": "sputtering", "temperature": 300, "lab_id": "A1"},
-    {"method": "evaporation", "temperature": 450, "lab_id": "B2"},
-]
-extracted = [
-    {"method": "sputtering", "temperature": 301, "lab_id": "A1"},
-    {"method": "evaporation", "temperature": 460, "lab_id": "B3"},
-]
-
-# 1. Infer schema from gold, add eval defaults
-eval_schema = infer_schema(gold)
-annotate_xeval(eval_schema)
-
-# 2. Review and customize eval_schema (edit x-eval-* keys)
-
-# 3.  Validate gold against eval_schema to catch errors and omissions
-# and parse schema to ensure no errors before evaluation.
-parse_eval_schema(eval_schema)
-validate_gold(gold, eval_schema)
-
-
-# 3. Evaluate
-result = evaluate(gold, extracted, schema=eval_schema)
-print(f"F1: {result.mean_f1:.2f}")
-print(f"Precision: {result.mean_precision:.2f}")
-print(f"Recall: {result.mean_recall:.2f}")
-
-for path, agg in result.per_field.items():
-    print(f"  {path}: score={agg.mean_score:.2f}  matches={agg.matches}  "
-          f"mismatches={agg.mismatches}  omissions={agg.omissions}")
-```
-
-For more details, please check examples in `examples/`.
-
-
----
 
 ## Comparators
 

@@ -4,7 +4,7 @@ This module owns ONLY the LLM-facing interface. The dispatch logic that hooks
 into the scoring layer lives in:
 
 - ``batch/semantic_comparator.py`` -- the BatchComparator wrapper
-- ``batch/process.py`` -- the generic process_batches dispatcher
+- ``core/comparators/batch.py`` -- the generic process_batches dispatcher
 
 The Judge Protocol is intentionally minimal:
 ``judge_batch(items) -> list[float | None]``. Implementations:

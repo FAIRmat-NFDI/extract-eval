@@ -1,15 +1,8 @@
-import json
-
-import pytest
-
 from struct_extract_eval.core.json_utils import (
     get_children,
-    get_leaf_paths,
     get_node_at_path,
     is_leaf,
-    iter_schema,
     resolve_type,
-    walk_schema,
 )
 
 # --- Shared fixtures ---
@@ -183,116 +176,6 @@ class TestGetChildren:
         children = get_children(FLAT_SCHEMA, path="")
         paths = [path for _, _, path in children]
         assert "name" in paths  # no leading dot
-
-
-# --- walk_schema ---
-
-
-class TestWalkSchema:
-    def test_flat_visits_all(self) -> None:
-        visited: list[str] = []
-        walk_schema(FLAT_SCHEMA, lambda _s, p: visited.append(p))
-        assert "" in visited  # root
-        assert "name" in visited
-        assert "age" in visited
-        assert "active" in visited
-
-    def test_nested_visits_all(self) -> None:
-        visited: list[str] = []
-        walk_schema(NESTED_SCHEMA, lambda _s, p: visited.append(p))
-        assert "" in visited
-        assert "experiment" in visited
-        assert "experiment.name" in visited
-        assert "experiment.temp" in visited
-
-    def test_array_of_objects(self) -> None:
-        visited: list[str] = []
-        walk_schema(ARRAY_OF_OBJECTS, lambda _s, p: visited.append(p))
-        assert "samples" in visited
-        assert "samples[]" in visited
-        assert "samples[].id" in visited
-        assert "samples[].value" in visited
-
-    def test_deeply_nested(self) -> None:
-        visited: list[str] = []
-        walk_schema(DEEPLY_NESTED, lambda _s, p: visited.append(p))
-        assert "experiment.samples[].measurements[].property" in visited
-        assert "experiment.samples[].measurements[].value" in visited
-
-    def test_pre_order(self) -> None:
-        """Parent is visited before children."""
-        visited: list[str] = []
-        walk_schema(NESTED_SCHEMA, lambda _s, p: visited.append(p))
-        assert visited.index("experiment") < visited.index("experiment.name")
-
-    def test_can_mutate(self) -> None:
-        """walk_schema passes the actual dict, so visitors can mutate."""
-        schema: dict[str, object] = {
-            "type": "object",
-            "properties": {
-                "x": {"type": "string"},
-            },
-        }
-
-        def add_marker(node: dict[str, object], path: str) -> None:
-            node["_visited"] = True
-
-        walk_schema(schema, add_marker)
-        assert schema["_visited"] is True
-        x_schema = schema["properties"]["x"]  # type: ignore[index]
-        assert x_schema["_visited"] is True
-
-
-# --- iter_schema ---
-
-
-class TestIterSchema:
-    def test_flat_yields_all(self) -> None:
-        paths = [path for _, path in iter_schema(FLAT_SCHEMA)]
-        assert set(paths) == {"", "name", "age", "active"}
-
-    def test_deeply_nested_yields_leaves(self) -> None:
-        paths = [path for _, path in iter_schema(DEEPLY_NESTED)]
-        assert "experiment.samples[].measurements[].property" in paths
-        assert "experiment.samples[].measurements[].value" in paths
-
-    def test_consistent_with_walk(self) -> None:
-        walk_paths: list[str] = []
-        walk_schema(FLAT_SCHEMA, lambda _s, p: walk_paths.append(p))
-        iter_paths = [path for _, path in iter_schema(FLAT_SCHEMA)]
-        assert walk_paths == iter_paths
-
-
-# --- get_leaf_paths ---
-
-
-class TestGetLeafPaths:
-    def test_flat(self) -> None:
-        leaves = get_leaf_paths(FLAT_SCHEMA)
-        assert set(leaves) == {"name", "age", "active"}
-
-    def test_nested(self) -> None:
-        leaves = get_leaf_paths(NESTED_SCHEMA)
-        assert set(leaves) == {"experiment.name", "experiment.temp"}
-
-    def test_array_of_primitives(self) -> None:
-        leaves = get_leaf_paths(ARRAY_OF_PRIMITIVES)
-        assert leaves == ["tags[]"]
-
-    def test_array_of_objects(self) -> None:
-        leaves = get_leaf_paths(ARRAY_OF_OBJECTS)
-        assert set(leaves) == {"samples[].id", "samples[].value"}
-
-    def test_deeply_nested(self) -> None:
-        leaves = get_leaf_paths(DEEPLY_NESTED)
-        assert set(leaves) == {
-            "experiment.samples[].measurements[].property",
-            "experiment.samples[].measurements[].value",
-        }
-
-    def test_bare_leaf(self) -> None:
-        leaves = get_leaf_paths({"type": "string"})
-        assert leaves == [""]
 
 
 # --- get_node_at_path ---

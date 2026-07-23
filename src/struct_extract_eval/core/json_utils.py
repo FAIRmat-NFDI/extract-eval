@@ -58,9 +58,6 @@ def resolve_type(schema: dict[str, object]) -> str | None:
 
 def is_leaf(schema: dict[str, object]) -> bool:
     """True if the schema node has no children to recurse into.
-
-    Defined in terms of :func:`get_children`: a node is a leaf
-    exactly when ``get_children(schema)`` returns an empty list.
     """
     return not get_children(schema)
 
@@ -69,7 +66,7 @@ def get_children(
     schema: dict[str, object],
     path: str = "",
 ) -> list[tuple[str, dict[str, object], str]]:
-    """Return immediate children of a resolved schema's node.
+    """Return immediate children of a resolved schema's node given a path.
 
     get ``schema``'s children. ``path`` is the path of ``schema`` itself.
     Returns a list of ``(field_name, child_schema, child_path)`` tuples.

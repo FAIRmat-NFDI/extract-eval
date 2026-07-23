@@ -1,4 +1,9 @@
-"""Batch comparator infrastructure: dispatcher, LLM judge clients, built-ins."""
+"""Batch comparator implementations: LLM judge clients and built-ins.
+
+The generic dispatcher lives in ``core/comparators/batch.py`` -- it has no
+I/O and core scoring depends on it. This package holds only the I/O-bound
+parts.
+"""
 
 from struct_extract_eval.batch.llm_judge import (
     DEFAULT_PROMPT_TEMPLATE,
@@ -7,7 +12,6 @@ from struct_extract_eval.batch.llm_judge import (
     Judge,
     JudgeItem,
 )
-from struct_extract_eval.batch.process import process_batches
 from struct_extract_eval.batch.semantic_comparator import SemanticBatchComparator
 
 __all__ = [
@@ -17,5 +21,4 @@ __all__ = [
     "Judge",
     "JudgeItem",
     "SemanticBatchComparator",
-    "process_batches",
 ]

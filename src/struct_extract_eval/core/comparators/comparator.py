@@ -1,20 +1,12 @@
 """Core comparator types.
 
-Two flavors of comparator:
+Two kinds of comparator:
 
-- ``Comparator`` (per-field): takes one (gold, extracted) pair and returns
-  one ``ComparatorResult``. The dispatcher calls it inline during scoring.
+- ``Comparator``: per-field comparator.
 
-- ``BatchComparator`` (many-at-once): takes a list of ``BatchItem`` and
-  returns a positional list of ``ComparatorResult | None`` (one entry per
-  input item). ``None`` means the handler couldn't decide for that item
-  and ``process_batches`` marks it as ``batch_error``. Use this when:
-  - Per-call setup is expensive (LLM judge, embedding model, external API)
-  - Multiple sibling fields together form one logical value (units, dates with
-    timezones, addresses) and the handler groups them by parent path
+- ``BatchComparator``: compare many fields at once.
 
-Implementations of ``BatchComparator`` are CLASSES (not bare functions) so they
-can carry configuration (e.g. a ``Judge`` instance, a connection pool).
+- ``CompoundComparator``: is a special kind of BatchComparator, it compares multiple compound fields.
 """
 
 from dataclasses import dataclass, field
@@ -44,7 +36,7 @@ class BatchItem:
     """One item in a batch passed to a BatchComparator.
 
     Carries everything a batch handler needs:
-    - path: where this field lives in the schema (e.g. "experiment.method")
+    - path: field path in the schema (e.g. "experiment.method")
     - gold_raw / extracted_raw: original values, as they appeared in the data
     - gold_compared / extracted_compared: post-transform values (what the
       comparator should actually compare). Same object as gold_raw/extracted_raw
@@ -81,7 +73,7 @@ class Comparator(Protocol):
 
 
 class BatchComparator(Protocol):
-    """Batch comparator. Many pairs in, many results out (one per input).
+    """Batch comparator. Many fields in, many results out (one per input).
 
     Implementations are classes that set ``is_batch = True`` as a class
     attribute. The scoring dispatcher uses this attribute to decide whether
@@ -221,7 +213,7 @@ class CompoundComparator:
 
     def __call__(self, items: list[BatchItem]) -> list[ComparatorResult | None]:
         # Group items by parent path of this compound key
-        by_parent: dict[str, list[tuple[int, BatchItem]]] = {}
+        by_parent: dict[str, list[tuple[int, BatchItem]]] = {} # int is used for mapping the by_parent back to the items
         for i, item in enumerate(items):
             parent = item.path.rsplit(".", 1)[0] if "." in item.path else ""
             by_parent.setdefault(parent, []).append((i, item))
