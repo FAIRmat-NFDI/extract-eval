@@ -3,6 +3,7 @@ import logging
 import pytest
 
 from struct_extract_eval.core.schema import (
+    collapse_multi_type_anyof,
     get_node_at_path,
     infer_schema,
     merge_all_of,
@@ -297,7 +298,7 @@ class TestRemoveNullAnyOf:
 
         assert cleaned == {"type": "string"}
 
-    def test_collapses_multiple_non_null_types_to_type_list(self) -> None:
+    def test_keeps_anyof_when_multiple_non_null_options_remain(self) -> None:
         schema = {
             "anyOf": [
                 {"type": "null"},
@@ -308,83 +309,8 @@ class TestRemoveNullAnyOf:
 
         cleaned = remove_null_anyof(schema)
 
-        assert cleaned == {"type": ["string", "integer"]}
-
-    def test_collapse_preserves_sibling_keys(self) -> None:
-        schema = {
-            "description": "a quantity",
-            "x-eval-compare": "exact",
-            "anyOf": [{"type": "string"}, {"type": "number"}],
-        }
-
-        cleaned = remove_null_anyof(schema)
-
-        assert cleaned == {
-            "description": "a quantity",
-            "x-eval-compare": "exact",
-            "type": ["string", "number"],
-        }
-
-    def test_collapse_flattens_list_valued_branch_types(self) -> None:
-        schema = {
-            "anyOf": [
-                {"type": ["string", "number"]},
-                {"type": "boolean"},
-            ],
-        }
-
-        cleaned = remove_null_anyof(schema)
-
-        assert cleaned == {"type": ["string", "number", "boolean"]}
-
-    def test_collapse_drops_branch_structure_and_warns(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        schema = {
-            "anyOf": [
-                {
-                    "type": "object",
-                    "properties": {"value": {"type": "number"}},
-                },
-                {"type": "string"},
-            ],
-        }
-
-        with caplog.at_level(
-            logging.WARNING, logger="struct_extract_eval.core.schema.inference"
-        ):
-            cleaned = remove_null_anyof(schema)
-
-        assert cleaned == {"type": ["object", "string"]}
-        assert any("dropped" in record.message for record in caplog.records)
-
-    def test_keeps_anyof_when_branches_share_a_single_type(self) -> None:
-        # Two object shapes: a list-valued type can't distinguish them, so the
-        # anyOf is kept (and will fail at parse time, per the resolve warning).
-        schema = {
-            "anyOf": [
-                {"type": "object", "properties": {"a": {"type": "string"}}},
-                {"type": "object", "properties": {"b": {"type": "number"}}},
-            ],
-        }
-
-        cleaned = remove_null_anyof(schema)
-
         assert "anyOf" in cleaned
-        assert "type" not in cleaned
-
-    def test_keeps_anyof_when_a_branch_has_no_type(self) -> None:
-        schema = {
-            "anyOf": [
-                {"enum": [1, 2, 3]},
-                {"type": "string"},
-            ],
-        }
-
-        cleaned = remove_null_anyof(schema)
-
-        assert "anyOf" in cleaned
-        assert "type" not in cleaned
+        assert cleaned["anyOf"] == [{"type": "string"}, {"type": "integer"}]
 
     def test_processes_nested_dicts_and_lists(self) -> None:
         schema = {
@@ -407,6 +333,103 @@ class TestRemoveNullAnyOf:
 
         assert cleaned["properties"]["name"] == {"type": "string"}
         assert cleaned["properties"]["tags"]["items"] == {"type": "string"}
+
+
+class TestCollapseMultiTypeAnyOf:
+    def test_collapses_multiple_typed_branches_to_type_list(self) -> None:
+        schema = {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert collapsed == {"type": ["string", "integer"]}
+
+    def test_preserves_sibling_keys(self) -> None:
+        schema = {
+            "description": "a quantity",
+            "x-eval-compare": "exact",
+            "anyOf": [{"type": "string"}, {"type": "number"}],
+        }
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert collapsed == {
+            "description": "a quantity",
+            "x-eval-compare": "exact",
+            "type": ["string", "number"],
+        }
+
+    def test_flattens_list_valued_branch_types(self) -> None:
+        schema = {
+            "anyOf": [
+                {"type": ["string", "number"]},
+                {"type": "boolean"},
+            ],
+        }
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert collapsed == {"type": ["string", "number", "boolean"]}
+
+    def test_drops_branch_structure_and_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        schema = {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {"value": {"type": "number"}},
+                },
+                {"type": "string"},
+            ],
+        }
+
+        with caplog.at_level(
+            logging.WARNING, logger="struct_extract_eval.core.schema.inference"
+        ):
+            collapsed = collapse_multi_type_anyof(schema)
+
+        assert collapsed == {"type": ["object", "string"]}
+        assert any("dropped" in record.message for record in caplog.records)
+
+    def test_keeps_anyof_when_branches_share_a_single_type(self) -> None:
+        # Two object shapes: a list-valued type can't distinguish them, so the
+        # anyOf is kept (and will fail at parse time, per the resolve warning).
+        schema = {
+            "anyOf": [
+                {"type": "object", "properties": {"a": {"type": "string"}}},
+                {"type": "object", "properties": {"b": {"type": "number"}}},
+            ],
+        }
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert "anyOf" in collapsed
+        assert "type" not in collapsed
+
+    def test_keeps_anyof_when_a_branch_has_no_type(self) -> None:
+        schema = {
+            "anyOf": [
+                {"enum": [1, 2, 3]},
+                {"type": "string"},
+            ],
+        }
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert "anyOf" in collapsed
+        assert "type" not in collapsed
+
+    def test_processes_nested_dicts(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "quantity": {"anyOf": [{"type": "string"}, {"type": "number"}]},
+            },
+        }
+
+        collapsed = collapse_multi_type_anyof(schema)
+
+        assert collapsed["properties"]["quantity"] == {"type": ["string", "number"]}
 
 
 class TestResolveSchemaReferences:
