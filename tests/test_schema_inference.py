@@ -1,7 +1,7 @@
 import pytest
 
-from struct_extract_eval.core.json_utils import get_node_at_path
-from struct_extract_eval.core.schema_inference import (
+from struct_extract_eval.core.schema import (
+    get_node_at_path,
     infer_schema,
     merge_all_of,
     remove_null_anyof,

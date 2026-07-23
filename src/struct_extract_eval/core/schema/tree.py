@@ -17,18 +17,18 @@ from struct_extract_eval.core.comparators.registry import (
     ComparatorNotFoundError,
     get_comparator,
 )
-from struct_extract_eval.core.json_utils import (
+from struct_extract_eval.core.schema.utils import (
     get_children,
     is_leaf,
     non_null_types,
     resolve_type,
 )
+from struct_extract_eval.core.schema.xeval import parse_xeval_entry
 from struct_extract_eval.core.transforms.registry import (
     TransformNotFoundError,
     get_transform,
 )
 from struct_extract_eval.core.transforms.transform import TransformSpec
-from struct_extract_eval.core.xeval import parse_xeval_entry
 
 logger = logging.getLogger(__name__)
 

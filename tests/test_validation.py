@@ -2,8 +2,11 @@ import logging
 
 import pytest
 
-from struct_extract_eval.core.validation import GoldValidationError, validate_gold
-from struct_extract_eval.core.xeval import annotate_xeval
+from struct_extract_eval.core.schema import (
+    GoldValidationError,
+    annotate_xeval,
+    validate_gold,
+)
 
 
 def _eval_schema(raw: dict[str, object]) -> dict[str, object]:

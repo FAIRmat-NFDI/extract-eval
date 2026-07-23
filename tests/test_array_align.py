@@ -11,9 +11,12 @@ import pytest
 
 from struct_extract_eval.core.comparators.comparator import BatchItem, ComparatorResult
 from struct_extract_eval.core.comparators.registry import _clear_registry, register
-from struct_extract_eval.core.schema import SchemaError, parse_eval_schema
+from struct_extract_eval.core.schema import (
+    SchemaError,
+    annotate_xeval,
+    parse_eval_schema,
+)
 from struct_extract_eval.core.scoring import score_record
-from struct_extract_eval.core.xeval import annotate_xeval
 from struct_extract_eval.evaluator import evaluate
 
 

@@ -2,9 +2,8 @@ import pytest
 
 from struct_extract_eval.core.comparators.comparator import ComparatorResult
 from struct_extract_eval.core.comparators.registry import _clear_registry, register
-from struct_extract_eval.core.schema import parse_eval_schema
+from struct_extract_eval.core.schema import annotate_xeval, parse_eval_schema
 from struct_extract_eval.core.scoring import score_record
-from struct_extract_eval.core.xeval import annotate_xeval
 
 
 def _make_schema(raw: dict[str, object]) -> "SchemaNode":  # noqa: F821

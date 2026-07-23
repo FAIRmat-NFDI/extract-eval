@@ -1,7 +1,6 @@
 from copy import deepcopy
 
-from struct_extract_eval.core.schema_inference import infer_schema
-from struct_extract_eval.core.xeval import annotate_xeval
+from struct_extract_eval.core.schema import annotate_xeval, infer_schema
 from struct_extract_eval.evaluator import evaluate
 
 

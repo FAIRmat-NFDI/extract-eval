@@ -31,7 +31,8 @@ def _json_type(value: object) -> str:
 
 
 def _type_family(value: object) -> str:
-    """Coarse type family for polymorphism detection.
+    """Coarse type family for polymorphism detection. Json schem's number
+     can be any numeric value, including decimals
 
     Like :func:`_json_type` but collapses ``integer`` and ``number`` into one
     family: the numeric comparator already treats ``5`` and ``5.0`` as equal,
