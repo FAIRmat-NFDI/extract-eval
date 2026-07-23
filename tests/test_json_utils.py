@@ -1,13 +1,7 @@
-import json
-
-import pytest
-
 from struct_extract_eval.core.json_utils import (
     get_children,
-    get_leaf_paths,
     get_node_at_path,
     is_leaf,
-    iter_schema,
     resolve_type,
 )
 

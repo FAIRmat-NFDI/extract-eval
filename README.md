@@ -63,13 +63,12 @@ annotate_xeval(eval_schema)
 
 # 2. Review and customize eval_schema (edit x-eval-* keys)
 
-# 3.  Validate gold against eval_schema to catch errors and omissions
+# 3. Validate gold against eval_schema to catch errors and omissions
 # and parse schema to ensure no errors before evaluation.
 parse_eval_schema(eval_schema)
 validate_gold(gold, eval_schema)
 
-
-# 3. Evaluate
+# 4. Evaluate
 result = evaluate(gold, extracted, schema=eval_schema)
 print(f"F1: {result.mean_f1:.2f}")
 print(f"Precision: {result.mean_precision:.2f}")
