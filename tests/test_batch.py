@@ -14,13 +14,13 @@ import pytest
 from struct_extract_eval.batch import (
     FakeJudge,
     SemanticBatchComparator,
-    process_batches,
 )
 from struct_extract_eval.batch.llm_judge import (
     JudgeItem,
     _coerce_binary_score,
     _parse_judge_response,
 )
+from struct_extract_eval.core.comparators.batch import process_batches
 from struct_extract_eval.core.comparators.comparator import (
     BatchItem,
     ComparatorResult,

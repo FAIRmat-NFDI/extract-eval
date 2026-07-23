@@ -58,9 +58,6 @@ def resolve_type(schema: dict[str, object]) -> str | None:
 
 def is_leaf(schema: dict[str, object]) -> bool:
     """True if the schema node has no children to recurse into.
-
-    Defined in terms of :func:`get_children`: a node is a leaf
-    exactly when ``get_children(schema)`` returns an empty list.
     """
     return not get_children(schema)
 
@@ -69,7 +66,7 @@ def get_children(
     schema: dict[str, object],
     path: str = "",
 ) -> list[tuple[str, dict[str, object], str]]:
-    """Return immediate children of a resolved schema's node.
+    """Return immediate children of a resolved schema's node given a path.
 
     Returns a list of ``(field_name, child_schema, child_path)`` tuples.
 
@@ -101,21 +98,6 @@ def get_children(
         children.append(("[]", items, child_path))
 
     return children
-
-
-def walk_schema(
-    schema: dict[str, object],
-    visit: Callable[[dict[str, object], str], None],  # todo: rename visit to apply or fn
-    path: str = "",
-) -> None:
-    """Pre-order depth-first walk over a raw JSON Schema dict.
-
-    Calls ``visit(node_schema, path)`` at each node, then recurses
-    into children (properties for objects, items for arrays).
-    """
-    visit(schema, path)
-    for _name, child_schema, child_path in get_children(schema, path):
-        walk_schema(child_schema, visit, child_path)
 
 
 def iter_schema(

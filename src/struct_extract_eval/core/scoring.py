@@ -9,7 +9,7 @@ maximize total F1.
 
 import logging
 
-from struct_extract_eval.batch.process import process_batches
+from struct_extract_eval.core.comparators.batch import process_batches
 from struct_extract_eval.core.comparators.registry import get_comparator, is_batch
 from struct_extract_eval.core.field_result import FieldResult
 from struct_extract_eval.core.schema import SchemaNode

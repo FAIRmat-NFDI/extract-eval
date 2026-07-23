@@ -22,6 +22,7 @@ by default. Register them yourself before calling evaluate():
 from collections.abc import Callable
 from copy import deepcopy
 
+from struct_extract_eval.core.comparators.batch import process_batches
 from struct_extract_eval.core.record import (
     RunResult,
     build_record_result,
@@ -46,8 +47,6 @@ def _run_evaluation(
     after per-record scoring. ``post_process`` (if provided) runs last,
     after batch dispatch.
     """
-    from struct_extract_eval.batch.process import process_batches
-
     records = []
     for record_id, g, e in pairs:
         field_results = score_record(tree, g, e)
