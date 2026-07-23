@@ -21,6 +21,7 @@ _BUILTIN_COMPARATORS: dict[str, Comparator | BatchComparator] = {
     "oneof": compare_oneof,
 }
 
+# _registry is for registering custom comparators.
 _registry: dict[str, Comparator | BatchComparator] = {}
 
 
