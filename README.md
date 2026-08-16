@@ -36,9 +36,9 @@ This package helps you:
 ## Installation
 
 ```bash
-pip install -e .                       # core only
-pip install -e ".[dev]"                # core + dev tools
-pip install -e ".[dev,methodology]"    # + IAA, contamination, shift detection
+pip install -e .                      
+pip install -e ".[dev]"              
+pip install -e ".[dev,methodology]"    
 ```
 
 Requires Python >= 3.10.
@@ -184,6 +184,8 @@ the schema.
 
 
 ## Comparators
+
+For a full list of comparators in this package, please see the [methodology documentation](docs/comparators.md).
 
 Built-in comparators (registered by default):
 
