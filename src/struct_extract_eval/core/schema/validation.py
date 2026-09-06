@@ -65,6 +65,28 @@ class GoldValidationError(Exception):
         super().__init__(message)
 
 
+def _validate_gold_property_names(
+    value: object, record_id: str | int, parent_path: str = ""
+) -> None:
+    """Reject names that cannot be represented by SchemaNode paths."""
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if isinstance(key, str) and "." in key:
+                path = f"{parent_path}.{key}" if parent_path else key
+                location = parent_path or "<root>"
+                raise GoldValidationError(
+                    f"Record {record_id!r}: {location}: property name {key!r} "
+                    "contains '.', which is reserved as the path separator. "
+                    "Rename the key.",
+                    record_id=record_id,
+                    path=path,
+                )
+            child_path = f"{parent_path}.{key}" if parent_path else str(key)
+            _validate_gold_property_names(child, record_id, child_path)
+    elif isinstance(value, list):
+        for item in value:
+            _validate_gold_property_names(item, record_id, f"{parent_path}[]")
+
 
 def validate_gold(
     gold: list[dict[str, object]],
@@ -139,6 +161,7 @@ def validate_gold(
             record_id: str | int = raw_id
         else:
             record_id = i
+        _validate_gold_property_names(g, record_id)
         _validate_node(tree, g, record_id, warn_missing, ignore_keys, strict_types)
 
 
