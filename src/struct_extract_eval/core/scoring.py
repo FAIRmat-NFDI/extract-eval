@@ -144,10 +144,8 @@ def _score_node(
     # by its comparator via _score_leaf:
     #   - leaves (annotate_xeval assigns a default comparator)
     #   - skip nodes (handled inside _score_leaf)
-    #   - a container with an explicit x-eval-compare -- a polymorphic field
-    #     (issue #82): the comparator receives the whole raw value and owns
-    #     type + value, so "equal by the comparator" is a match even when the
-    #     runtime type differs from the schema type.
+    #   - a container with an explicit x-eval-compare: the comparator receives the
+    #   whole value and apply comparator.
     #
     # We intentionally gate on node.children, not node.json_type: json_type is
     # only a reference (it can be wrong for a polymorphic field), while the
@@ -155,16 +153,7 @@ def _score_node(
     if not node.children or node.comparator.name:
         return [_score_leaf(node, gold_value, extracted_value)]
 
-    # A container's eval config is bound to its own type: an object node carries
-    # its child fields' comparators, an array node carries an items schema and an
-    # alignment strategy. So the structural scorer can only run when BOTH sides
-    # are that type. Otherwise apply the shared wrong-type / missing policy
-    # (issues #56 / #82) -- identical for objects and arrays.
-    #
-    # A genuinely polymorphic field (e.g. sometimes an object, sometimes an
-    # array) should carry an explicit x-eval-compare, which routes it to the
-    # comparator above. Element-level scoring of *both* shapes would need
-    # multi-type schema support -- see issue #83.
+
     expected = dict if node.json_type == "object" else list
     if not (isinstance(gold_value, expected) and isinstance(extracted_value, expected)):
         return _score_container_type_error(node, gold_value, extracted_value, expected)
