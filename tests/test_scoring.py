@@ -1111,35 +1111,32 @@ class TestSkipFields:
 
 class TestScoreObjectEdgeCases:
     def test_same_field_name_at_different_depths(self) -> None:
-        # "b" appears as a.b (object) and a.d.b (leaf). Lookup is per node, so
-        # the two must not interfere with each other.
+        # "name" appears at experiment.name and at experiment.sample.name.
+        # Lookup is per node, so the two must not interfere with each other.
         schema = _make_schema({
             "type": "object",
             "properties": {
-                "a": {
+                "experiment": {
                     "type": "object",
                     "properties": {
-                        "b": {
+                        "name": {"type": "string"},
+                        "sample": {
                             "type": "object",
-                            "properties": {"c": {"type": "string"}},
-                        },
-                        "d": {
-                            "type": "object",
-                            "properties": {"b": {"type": "string"}},
+                            "properties": {"name": {"type": "string"}},
                         },
                     },
                 },
             },
         })
-        gold = {"a": {"b": {"c": "1"}, "d": {"b": "2"}}}
-        extracted = {"a": {"b": {"c": "1"}, "d": {"b": "WRONG"}}}
+        gold = {"experiment": {"name": "XRD run", "sample": {"name": "Si wafer"}}}
+        extracted = {"experiment": {"name": "XRD run", "sample": {"name": "WRONG"}}}
         results = score_record(schema, gold, extracted)
         by_path = {r.path: r for r in results}
         assert len(results) == 2
-        assert by_path["a.b.c"].status == "match"
-        assert by_path["a.d.b"].status == "mismatch"
-        assert by_path["a.d.b"].gold_value == "2"
-        assert by_path["a.d.b"].extracted_value == "WRONG"
+        assert by_path["experiment.name"].status == "match"
+        assert by_path["experiment.sample.name"].status == "mismatch"
+        assert by_path["experiment.sample.name"].gold_value == "Si wafer"
+        assert by_path["experiment.sample.name"].extracted_value == "WRONG"
 
     def test_skip_on_object_node_does_not_traverse_children(self) -> None:
         schema = _make_schema({
@@ -1408,36 +1405,34 @@ class TestScoreObjectDirect:
         assert results[0].status == "match"
 
     def test_same_field_name_at_different_depths(self) -> None:
-        # "b" is both an object child of "a" and a leaf child of "a.d". The
-        # lookup is against the dict at the current node, so they never collide.
+        # "name" is a leaf child of "experiment" and also a leaf child of
+        # "experiment.sample". The lookup is against the dict at the current
+        # node, so they never collide.
         root = _make_schema({
             "type": "object",
             "properties": {
-                "a": {
+                "experiment": {
                     "type": "object",
                     "properties": {
-                        "b": {
+                        "name": {"type": "string"},
+                        "sample": {
                             "type": "object",
-                            "properties": {"c": {"type": "string"}},
-                        },
-                        "d": {
-                            "type": "object",
-                            "properties": {"b": {"type": "string"}},
+                            "properties": {"name": {"type": "string"}},
                         },
                     },
                 },
             },
         })
-        a_node = root.children[0]
+        experiment_node = root.children[0]
         results = _score_object(
-            a_node,
-            {"b": {"c": "1"}, "d": {"b": "2"}},
-            {"b": {"c": "1"}, "d": {"b": "WRONG"}},
+            experiment_node,
+            {"name": "XRD run", "sample": {"name": "Si wafer"}},
+            {"name": "XRD run", "sample": {"name": "WRONG"}},
         )
         by_path = {r.path: r for r in results}
         assert len(results) == 2
-        assert by_path["a.b.c"].status == "match"
-        assert by_path["a.d.b"].status == "mismatch"
+        assert by_path["experiment.name"].status == "match"
+        assert by_path["experiment.sample.name"].status == "mismatch"
 
 
 class TestListValuedType:
