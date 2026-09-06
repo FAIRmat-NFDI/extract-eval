@@ -1106,6 +1106,192 @@ class TestSkipFields:
         assert scored[0].path == "name"
 
 
+# --- _score_object edge cases (issue #115) ---
+
+
+class TestScoreObjectEdgeCases:
+    def test_same_field_name_at_different_depths(self) -> None:
+        # "b" appears as a.b (object) and a.d.b (leaf). Lookup is per node, so
+        # the two must not interfere with each other.
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "a": {
+                    "type": "object",
+                    "properties": {
+                        "b": {
+                            "type": "object",
+                            "properties": {"c": {"type": "string"}},
+                        },
+                        "d": {
+                            "type": "object",
+                            "properties": {"b": {"type": "string"}},
+                        },
+                    },
+                },
+            },
+        })
+        gold = {"a": {"b": {"c": "1"}, "d": {"b": "2"}}}
+        extracted = {"a": {"b": {"c": "1"}, "d": {"b": "WRONG"}}}
+        results = score_record(schema, gold, extracted)
+        by_path = {r.path: r for r in results}
+        assert len(results) == 2
+        assert by_path["a.b.c"].status == "match"
+        assert by_path["a.d.b"].status == "mismatch"
+        assert by_path["a.d.b"].gold_value == "2"
+        assert by_path["a.d.b"].extracted_value == "WRONG"
+
+    def test_skip_on_object_node_does_not_traverse_children(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "type": "object",
+                    "x-eval-skip": True,
+                    "properties": {"a": {"type": "string"}},
+                },
+            },
+        })
+        results = score_record(schema, {"meta": {"a": "1"}}, {"meta": {"a": "2"}})
+        assert len(results) == 1
+        assert results[0].path == "meta"
+        assert results[0].status == "skipped"
+        assert results[0].gold_value == {"a": "1"}
+        assert results[0].extracted_value == {"a": "2"}
+
+    def test_extra_key_with_container_value_is_single_hallucination(self) -> None:
+        # An unknown key is reported once with its whole value, not expanded
+        # per inner field -- there is no schema to expand it against.
+        schema = _make_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+        blob = {"p": 1, "q": [1, 2]}
+        results = score_record(schema, {"name": "x"}, {"name": "x", "blob": blob})
+        by_path = {r.path: r for r in results}
+        assert len(results) == 2
+        assert by_path["name"].status == "match"
+        assert by_path["blob"].status == "hallucination"
+        assert by_path["blob"].gold_value is None
+        assert by_path["blob"].extracted_value == blob
+
+    def test_nested_empty_gold_vs_nonempty_extracted(self) -> None:
+        # The both-empty short-circuit ({} vs {} -> match) must not fire when
+        # only one side is empty; children are scored normally.
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                },
+            },
+        })
+        results = score_record(schema, {"meta": {}}, {"meta": {"a": "1"}})
+        assert len(results) == 1
+        assert results[0].path == "meta.a"
+        assert results[0].status == "hallucination"
+
+    def test_nested_nonempty_gold_vs_empty_extracted(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                },
+            },
+        })
+        results = score_record(schema, {"meta": {"a": "1"}}, {"meta": {}})
+        assert len(results) == 1
+        assert results[0].path == "meta.a"
+        assert results[0].status == "omission"
+
+    def test_result_order_is_schema_order_then_sorted_extras(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "zeta": {"type": "string"},
+                "alpha": {"type": "string"},
+            },
+        })
+        gold = {"zeta": "1", "alpha": "2"}
+        extracted = {"alpha": "2", "zeta": "1", "b_extra": "x", "a_extra": "y"}
+        results = score_record(schema, gold, extracted)
+        assert [r.path for r in results] == ["zeta", "alpha", "a_extra", "b_extra"]
+
+    def test_skip_field_absent_on_both_sides_still_emitted(self) -> None:
+        # Skip results are emitted unconditionally for visibility, even when
+        # neither side has the field.
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string", "x-eval-skip": True},
+            },
+        })
+        results = score_record(schema, {"name": "Alice"}, {"name": "Alice"})
+        by_path = {r.path: r for r in results}
+        assert len(results) == 2
+        assert by_path["description"].status == "skipped"
+        assert by_path["description"].gold_value is None
+        assert by_path["description"].extracted_value is None
+
+
+class TestScoreObjectKnownBugs:
+    """Tests that document open bugs. Each is xfail(strict=True) so the fix
+    PR turns it green by deleting the marker."""
+
+    def test_gold_key_not_in_schema_is_ignored_when_extracted_lacks_it(self) -> None:
+        # Not a bug on its own, but pins the half of #113 that already
+        # behaves as desired: a gold-only unknown key produces no result.
+        schema = _make_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+        results = score_record(schema, {"name": "a", "extra": "x"}, {"name": "a"})
+        assert [r.path for r in results] == ["name"]
+        assert results[0].status == "match"
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="#113: gold key not in schema is flagged as hallucination when "
+        "extracted reproduces it; should be skipped",
+    )
+    def test_gold_key_not_in_schema_reproduced_by_extracted_is_not_hallucination(
+        self,
+    ) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+        results = score_record(
+            schema, {"name": "a", "extra": "x"}, {"name": "a", "extra": "x"}
+        )
+        by_path = {r.path: r for r in results}
+        assert by_path["extra"].status != "hallucination"
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="#114: property name containing '.' is split as a path and "
+        "misreported as hallucination",
+    )
+    def test_property_name_containing_dot(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {
+                "x.y": {"type": "string"},
+                "z": {"type": "string"},
+            },
+        })
+        record = {"x.y": "1", "z": "2"}
+        results = score_record(schema, record, dict(record))
+        by_path = {r.path: r for r in results}
+        assert len(results) == 2
+        assert by_path["z"].status == "match"
+        assert by_path["x.y"].status == "match"
+
+
 class TestListValuedType:
     def test_multi_type_default_exact_match(self) -> None:
         schema = _make_schema({
