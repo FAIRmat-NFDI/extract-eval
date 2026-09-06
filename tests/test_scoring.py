@@ -137,6 +137,46 @@ class TestMissingFields:
         assert by_path["extra"].extracted_value == "ignored"
         assert by_path["extra"].gold_value is None
 
+    def test_gold_field_not_in_schema_is_skipped_when_extracted_is_missing(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+
+        results = score_record(
+            schema,
+            {"name": "Alice", "provenance": "annotator-1"},
+            {"name": "Alice"},
+        )
+        by_path = {result.path: result for result in results}
+
+        assert by_path["provenance"].status == "skipped"
+        assert by_path["provenance"].extracted_value is None
+        assert by_path["provenance"].reason == (
+            "gold field not in schema, no comparator to apply"
+        )
+
+    def test_matching_unknown_gold_field_is_consumed_as_skip(self) -> None:
+        schema = _make_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+
+        results = score_record(
+            schema,
+            {"name": "Alice", "provenance": "annotator-1"},
+            {"name": "Alice", "provenance": "annotator-1"},
+        )
+        by_path = {result.path: result for result in results}
+
+        assert by_path["provenance"].status == "skipped"
+        assert by_path["provenance"].extracted_value == "annotator-1"
+        assert by_path["provenance"].reason == (
+            "gold field not in schema, no comparator to apply; "
+            "extracted also has this field"
+        )
+        assert not any(result.status == "hallucination" for result in results)
+
     def test_multiple_extra_fields_sorted_order(self) -> None:
         schema = _make_schema({
             "type": "object",
@@ -1043,6 +1083,7 @@ class TestSkipFields:
         by_path = {r.path: r for r in results}
         assert by_path["name"].status == "match"
         assert by_path["description"].status == "skipped"
+        assert by_path["description"].reason == "skipped by x-eval-skip"
         assert by_path["description"].gold_value == "some text"
         assert by_path["description"].extracted_value == "other text"
 
