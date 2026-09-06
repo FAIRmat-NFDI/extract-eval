@@ -19,32 +19,6 @@ from struct_extract_eval.core.transforms.transform import TransformSpec
 logger = logging.getLogger(__name__)
 
 
-def _score_container(
-    node: SchemaNode,
-    gold_value: object,
-    extracted_value: object,
-) -> list[FieldResult]:
-    """Score an object or array node that has no explicit comparator.
-
-    A container's eval config is bound to its own type: an object node carries
-    its child fields' comparators, an array node carries an items schema and an
-    alignment strategy. So the structural scorer can only run when BOTH sides
-    are that type. Otherwise we apply the shared wrong-type / missing policy
-    (issues #56 / #82) -- identical for objects and arrays.
-
-    A genuinely polymorphic field (e.g. sometimes an object, sometimes an
-    array) should carry an explicit ``x-eval-compare``; ``_score_node`` routes
-    that to the comparator, so it never reaches here. Element-level scoring of
-    *both* shapes would need multi-type schema support -- see issue #83.
-    """
-    expected = dict if node.json_type == "object" else list
-    if isinstance(gold_value, expected) and isinstance(extracted_value, expected):
-        if node.json_type == "object":
-            return _score_object(node, gold_value, extracted_value)
-        return _score_array(node, gold_value, extracted_value)
-    return _score_container_type_error(node, gold_value, extracted_value, expected)
-
-
 def _score_container_type_error(
     node: SchemaNode,
     gold_value: object,
@@ -177,11 +151,26 @@ def _score_node(
     #
     # We intentionally gate on node.children, not node.json_type: json_type is
     # only a reference (it can be wrong for a polymorphic field), while the
-    # actual gold/extracted values determine the real type inside
-    # _score_container.
-    if node.children and not node.comparator.name:
-        return _score_container(node, gold_value, extracted_value)
-    return [_score_leaf(node, gold_value, extracted_value)]
+    # actual gold/extracted values determine the real type below.
+    if not node.children or node.comparator.name:
+        return [_score_leaf(node, gold_value, extracted_value)]
+
+    # A container's eval config is bound to its own type: an object node carries
+    # its child fields' comparators, an array node carries an items schema and an
+    # alignment strategy. So the structural scorer can only run when BOTH sides
+    # are that type. Otherwise apply the shared wrong-type / missing policy
+    # (issues #56 / #82) -- identical for objects and arrays.
+    #
+    # A genuinely polymorphic field (e.g. sometimes an object, sometimes an
+    # array) should carry an explicit x-eval-compare, which routes it to the
+    # comparator above. Element-level scoring of *both* shapes would need
+    # multi-type schema support -- see issue #83.
+    expected = dict if node.json_type == "object" else list
+    if not (isinstance(gold_value, expected) and isinstance(extracted_value, expected)):
+        return _score_container_type_error(node, gold_value, extracted_value, expected)
+    if node.json_type == "object":
+        return _score_object(node, gold_value, extracted_value)
+    return _score_array(node, gold_value, extracted_value)
 
 
 def _score_object(
@@ -191,7 +180,7 @@ def _score_object(
 ) -> list[FieldResult]:
     """Score an object node by iterating its children.
 
-    _score_container guarantees both sides are real dicts before dispatching.
+    _score_node guarantees both sides are real dicts before dispatching.
     """
     assert isinstance(gold_value, dict) and isinstance(extracted_value, dict)
     gold_dict: dict[str, object] = gold_value
@@ -305,7 +294,7 @@ def _score_array_ordered(
     extracted_value: object,
 ) -> list[FieldResult]:
     """Score an array node using ordered (positional) matching."""
-    # _score_container guarantees both sides are real lists before dispatching.
+    # _score_node guarantees both sides are real lists before dispatching.
     assert isinstance(gold_value, list) and isinstance(extracted_value, list)
     gold_list: list[object] = gold_value
     extracted_list: list[object] = extracted_value
@@ -374,7 +363,7 @@ def _score_array_hungarian(
     """
     from struct_extract_eval.core.record import build_record_result
 
-    # _score_container guarantees both sides are real lists before dispatching.
+    # _score_node guarantees both sides are real lists before dispatching.
     assert isinstance(gold_value, list) and isinstance(extracted_value, list)
     gold_list: list[object] = gold_value
     extracted_list: list[object] = extracted_value
@@ -517,7 +506,7 @@ def _score_array_matched_by_key_field(
     are paired and scored recursively. Unmatched gold elements produce
     omissions; unmatched extracted elements produce hallucinations.
     """
-    # _score_container guarantees both sides are real lists before dispatching.
+    # _score_node guarantees both sides are real lists before dispatching.
     assert isinstance(gold_value, list) and isinstance(extracted_value, list)
     gold_list: list[object] = gold_value
     extracted_list: list[object] = extracted_value
