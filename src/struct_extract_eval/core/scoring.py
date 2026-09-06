@@ -194,7 +194,7 @@ def _score_object(
     _score_container guarantees both sides are real dicts before dispatching.
     """
     assert isinstance(gold_value, dict) and isinstance(extracted_value, dict)
-    gold_dict: dict[str, object] = gold_value
+    gold_dict: dict[str, object] = gold_value # for type checkers
     extracted_dict: dict[str, object] = extracted_value
     results: list[FieldResult] = []
 
@@ -218,7 +218,7 @@ def _score_object(
         # Skip fields are included in results for visibility but excluded
         # from all metric calculations (precision, recall, F1, total_fields).
         if child.skip:
-            gold_val = gold_dict.get(field_name)
+            gold_val = gold_dict.get(field_name) # only get the current layer
             extracted_val = extracted_dict.get(field_name)
             results.append(FieldResult(
                 path=child.path,
