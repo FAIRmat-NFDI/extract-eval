@@ -3,7 +3,7 @@ import pytest
 from struct_extract_eval.core.comparators.comparator import ComparatorResult
 from struct_extract_eval.core.comparators.registry import _clear_registry, register
 from struct_extract_eval.core.schema import annotate_xeval, parse_eval_schema
-from struct_extract_eval.core.scoring import score_record
+from struct_extract_eval.core.scoring import _score_object, score_record
 
 
 def _make_schema(raw: dict[str, object]) -> "SchemaNode":  # noqa: F821
@@ -1236,6 +1236,208 @@ class TestScoreObjectEdgeCases:
         assert by_path["description"].status == "skipped"
         assert by_path["description"].gold_value is None
         assert by_path["description"].extracted_value is None
+
+
+# --- _score_object called directly (issue #115) ---
+
+
+class TestScoreObjectDirect:
+    """Unit tests for _score_object itself, bypassing _score_node dispatch.
+
+    _score_object is the function that assigns every object field its status,
+    so its contract is pinned here independently of the layers above it.
+    """
+
+    def test_requires_dicts_on_both_sides(self) -> None:
+        # _score_container is responsible for routing non-dicts elsewhere.
+        # _score_object itself refuses them rather than guessing.
+        node = _make_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+        with pytest.raises(AssertionError):
+            _score_object(node, {"name": "a"}, "not a dict")
+        with pytest.raises(AssertionError):
+            _score_object(node, None, {"name": "a"})
+
+    def test_both_empty_is_single_match_at_node_path(self) -> None:
+        node = _make_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+        results = _score_object(node, {}, {})
+        assert len(results) == 1
+        assert results[0].path == ""
+        assert results[0].status == "match"
+        assert results[0].score == 1.0
+        assert results[0].gold_value == {}
+        assert results[0].extracted_value == {}
+
+    def test_child_present_on_both_sides_is_compared(self) -> None:
+        node = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
+            },
+        })
+        results = _score_object(node, {"name": "a", "age": 1}, {"name": "a", "age": 2})
+        by_path = {r.path: r for r in results}
+        assert len(results) == 2
+        assert by_path["name"].status == "match"
+        assert by_path["age"].status == "mismatch"
+
+    def test_child_in_gold_only_is_omission(self) -> None:
+        node = _make_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+        results = _score_object(node, {"name": "a"}, {})
+        assert len(results) == 1
+        assert results[0].path == "name"
+        assert results[0].status == "omission"
+        assert results[0].gold_value == "a"
+        assert results[0].extracted_value is None
+
+    def test_child_in_extracted_only_is_hallucination(self) -> None:
+        node = _make_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+        results = _score_object(node, {}, {"name": "a"})
+        assert len(results) == 1
+        assert results[0].path == "name"
+        assert results[0].status == "hallucination"
+        assert results[0].gold_value is None
+        assert results[0].extracted_value == "a"
+
+    def test_child_absent_on_both_sides_produces_nothing(self) -> None:
+        node = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
+            },
+        })
+        results = _score_object(node, {"name": "a"}, {"name": "a"})
+        assert [r.path for r in results] == ["name"]
+
+    def test_skip_child_is_always_emitted_and_never_compared(self) -> None:
+        node = _make_schema({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "notes": {"type": "string", "x-eval-skip": True},
+            },
+        })
+        # Present on both sides with different values: still "skipped".
+        results = _score_object(node, {"name": "a", "notes": "x"}, {"name": "a", "notes": "y"})
+        by_path = {r.path: r for r in results}
+        assert by_path["notes"].status == "skipped"
+        assert by_path["notes"].score == 0.0
+        assert by_path["notes"].gold_value == "x"
+        assert by_path["notes"].extracted_value == "y"
+        # Absent on both sides: still emitted.
+        results = _score_object(node, {"name": "a"}, {"name": "a"})
+        by_path = {r.path: r for r in results}
+        assert by_path["notes"].status == "skipped"
+        assert by_path["notes"].gold_value is None
+        assert by_path["notes"].extracted_value is None
+
+    def test_unknown_extracted_key_is_hallucination_with_whole_value(self) -> None:
+        node = _make_schema({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+        blob = {"p": 1, "q": [1, 2]}
+        results = _score_object(node, {"name": "a"}, {"name": "a", "blob": blob})
+        by_path = {r.path: r for r in results}
+        assert len(results) == 2
+        assert by_path["blob"].status == "hallucination"
+        assert by_path["blob"].score == 0.0
+        assert by_path["blob"].comparator == ""
+        assert by_path["blob"].gold_value is None
+        assert by_path["blob"].extracted_value == blob
+
+    def test_output_order_is_schema_order_then_sorted_unknown_keys(self) -> None:
+        node = _make_schema({
+            "type": "object",
+            "properties": {
+                "zeta": {"type": "string"},
+                "alpha": {"type": "string"},
+            },
+        })
+        gold = {"alpha": "1", "zeta": "2"}
+        extracted = {"b_extra": "x", "zeta": "2", "a_extra": "y", "alpha": "1"}
+        results = _score_object(node, gold, extracted)
+        assert [r.path for r in results] == ["zeta", "alpha", "a_extra", "b_extra"]
+
+    def test_nested_node_prefixes_paths_with_node_path(self) -> None:
+        # Call _score_object on a child node, not the root, and check every
+        # emitted path (schema child, unknown key) carries the node's prefix.
+        root = _make_schema({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                },
+            },
+        })
+        meta_node = root.children[0]
+        assert meta_node.path == "meta"
+        results = _score_object(meta_node, {"a": "1"}, {"a": "1", "extra": "x"})
+        assert [r.path for r in results] == ["meta.a", "meta.extra"]
+        assert results[0].status == "match"
+        assert results[1].status == "hallucination"
+
+    def test_nested_node_both_empty_uses_node_path(self) -> None:
+        root = _make_schema({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                },
+            },
+        })
+        meta_node = root.children[0]
+        results = _score_object(meta_node, {}, {})
+        assert len(results) == 1
+        assert results[0].path == "meta"
+        assert results[0].status == "match"
+
+    def test_same_field_name_at_different_depths(self) -> None:
+        # "b" is both an object child of "a" and a leaf child of "a.d". The
+        # lookup is against the dict at the current node, so they never collide.
+        root = _make_schema({
+            "type": "object",
+            "properties": {
+                "a": {
+                    "type": "object",
+                    "properties": {
+                        "b": {
+                            "type": "object",
+                            "properties": {"c": {"type": "string"}},
+                        },
+                        "d": {
+                            "type": "object",
+                            "properties": {"b": {"type": "string"}},
+                        },
+                    },
+                },
+            },
+        })
+        a_node = root.children[0]
+        results = _score_object(
+            a_node,
+            {"b": {"c": "1"}, "d": {"b": "2"}},
+            {"b": {"c": "1"}, "d": {"b": "WRONG"}},
+        )
+        by_path = {r.path: r for r in results}
+        assert len(results) == 2
+        assert by_path["a.b.c"].status == "match"
+        assert by_path["a.d.b"].status == "mismatch"
 
 
 class TestListValuedType:
