@@ -19,105 +19,6 @@ from struct_extract_eval.core.transforms.transform import TransformSpec
 logger = logging.getLogger(__name__)
 
 
-def _score_container_type_error(
-    node: SchemaNode,
-    gold_value: object,
-    extracted_value: object,
-    expected: type,
-) -> list[FieldResult]:
-    """Wrong-type / missing policy when a container isn't the expected type.
-
-    Reached only for a container without a comparator (one with a comparator is
-    handled by ``_score_node``), so there is no comparator to consult here.
-
-    - both present, not both the expected type -> ``match`` if the raw values
-      are equal (the extractor reproduced gold exactly, even off-shape), else
-      ``mismatch``. With well-formed gold (a real container) an off-type
-      extracted value can never be equal, so this only ever rewards faithfully
-      reproducing already-off-shape gold.
-    - one side present, the other absent (``None``) -> omissions /
-      hallucinations, expanded element/field-wise when the present side IS the
-      expected type, otherwise a single node-level result.
-    - both absent -> nothing scorable.
-    """
-    gold_present = gold_value is not None
-    extracted_present = extracted_value is not None
-
-    if gold_present and extracted_present:
-        match = gold_value == extracted_value
-        return [FieldResult(
-            path=node.path,
-            score=1.0 if match else 0.0,
-            comparator="",
-            gold_value=gold_value,
-            extracted_value=extracted_value,
-            status="match" if match else "mismatch",
-            reason=None if match else (
-                f"type mismatch: gold {type(gold_value).__name__}, "
-                f"extracted {type(extracted_value).__name__}"
-            ),
-        )]
-
-    if gold_present:
-        if isinstance(gold_value, expected):
-            return _omission_results(node, gold_value)
-        return [FieldResult(
-            path=node.path,
-            score=0.0,
-            comparator="",
-            gold_value=gold_value,
-            extracted_value=None,
-            status="omission",
-        )]
-    if extracted_present:
-        if isinstance(extracted_value, expected):
-            return _hallucination_results(node, extracted_value)
-        return [FieldResult(
-            path=node.path,
-            score=0.0,
-            comparator="",
-            gold_value=None,
-            extracted_value=extracted_value,
-            status="hallucination",
-        )]
-    return []  # both absent
-
-
-def _rewrite_element_paths(
-    results: list["FieldResult"],
-    items_path: str,
-    element_index: int,
-) -> None:
-    """Rewrite schema paths to instance paths for array element results.
-
-    ``items_path`` is the items node's schema path (e.g. ``"steps[]"`` or
-    ``"layers[].steps[]"``). This function replaces the LAST ``[]`` in that
-    prefix with the element index, then applies the same replacement to every
-    FieldResult path that starts with the prefix.
-
-    Examples (items_path -> what happens to FieldResult.path):
-
-    - items_path=``"steps[]"``, index=0:
-      ``"steps[]"``      -> ``"steps[0]"``
-      ``"steps[].name"`` -> ``"steps[0].name"``
-
-    - items_path=``"layers[].steps[]"``, index=1:
-      ``"layers[].steps[]"``      -> ``"layers[].steps[1]"``
-      ``"layers[].steps[].name"`` -> ``"layers[].steps[1].name"``
-      (the parent ``layers[]`` is left for the outer array scorer to resolve)
-    """
-    last_bracket = items_path.rfind("[]")
-    if last_bracket == -1:
-        return  # no [] in path — nothing to rewrite
-    instance_path = (
-        items_path[:last_bracket] + f"[{element_index}]" + items_path[last_bracket + 2:]
-    )
-    prefix_len = len(items_path)
-    for r in results:
-        r.path = instance_path + r.path[prefix_len:]
-
-
-
 def score_record(
     schema: SchemaNode,
     gold: dict[str, object],
@@ -621,6 +522,70 @@ def _score_array_matched_by_key_field(
     return results
 
 
+def _score_container_type_error(
+    node: SchemaNode,
+    gold_value: object,
+    extracted_value: object,
+    expected: type,
+) -> list[FieldResult]:
+    """Wrong-type / missing policy when a container isn't the expected type.
+
+    Reached only for a container without a comparator (one with a comparator is
+    handled by ``_score_node``), so there is no comparator to consult here.
+
+    - both present, not both the expected type -> ``match`` if the raw values
+      are equal (the extractor reproduced gold exactly, even off-shape), else
+      ``mismatch``. With well-formed gold (a real container) an off-type
+      extracted value can never be equal, so this only ever rewards faithfully
+      reproducing already-off-shape gold.
+    - one side present, the other absent (``None``) -> omissions /
+      hallucinations, expanded element/field-wise when the present side IS the
+      expected type, otherwise a single node-level result.
+    - both absent -> nothing scorable.
+    """
+    gold_present = gold_value is not None
+    extracted_present = extracted_value is not None
+
+    if gold_present and extracted_present:
+        match = gold_value == extracted_value
+        return [FieldResult(
+            path=node.path,
+            score=1.0 if match else 0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=extracted_value,
+            status="match" if match else "mismatch",
+            reason=None if match else (
+                f"type mismatch: gold {type(gold_value).__name__}, "
+                f"extracted {type(extracted_value).__name__}"
+            ),
+        )]
+
+    if gold_present:
+        if isinstance(gold_value, expected):
+            return _omission_results(node, gold_value)
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=gold_value,
+            extracted_value=None,
+            status="omission",
+        )]
+    if extracted_present:
+        if isinstance(extracted_value, expected):
+            return _hallucination_results(node, extracted_value)
+        return [FieldResult(
+            path=node.path,
+            score=0.0,
+            comparator="",
+            gold_value=None,
+            extracted_value=extracted_value,
+            status="hallucination",
+        )]
+    return []  # both absent
+
+
 def _score_leaf(
     node: SchemaNode,
     gold_value: object,
@@ -831,3 +796,37 @@ def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[Fi
         extracted_value=extracted_value,
         status="hallucination",
     )]
+
+
+def _rewrite_element_paths(
+    results: list["FieldResult"],
+    items_path: str,
+    element_index: int,
+) -> None:
+    """Rewrite schema paths to instance paths for array element results.
+
+    ``items_path`` is the items node's schema path (e.g. ``"steps[]"`` or
+    ``"layers[].steps[]"``). This function replaces the LAST ``[]`` in that
+    prefix with the element index, then applies the same replacement to every
+    FieldResult path that starts with the prefix.
+
+    Examples (items_path -> what happens to FieldResult.path):
+
+    - items_path=``"steps[]"``, index=0:
+      ``"steps[]"``      -> ``"steps[0]"``
+      ``"steps[].name"`` -> ``"steps[0].name"``
+
+    - items_path=``"layers[].steps[]"``, index=1:
+      ``"layers[].steps[]"``      -> ``"layers[].steps[1]"``
+      ``"layers[].steps[].name"`` -> ``"layers[].steps[1].name"``
+      (the parent ``layers[]`` is left for the outer array scorer to resolve)
+    """
+    last_bracket = items_path.rfind("[]")
+    if last_bracket == -1:
+        return  # no [] in path — nothing to rewrite
+    instance_path = (
+        items_path[:last_bracket] + f"[{element_index}]" + items_path[last_bracket + 2:]
+    )
+    prefix_len = len(items_path)
+    for r in results:
+        r.path = instance_path + r.path[prefix_len:]
