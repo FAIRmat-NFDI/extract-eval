@@ -8,6 +8,7 @@ maximize total F1.
 """
 
 import logging
+from typing import Literal
 
 from struct_extract_eval.core.comparators.batch import process_batches
 from struct_extract_eval.core.comparators.registry import get_comparator, is_batch
@@ -117,10 +118,10 @@ def _score_object(
             results.extend(_score_node(child, gold_dict[field_name], extracted_dict[field_name]))
         elif gold_has and not extracted_has:
             # Schema has key, gold has key, extracted missing -> omission
-            results.extend(_omission_results(child, gold_dict[field_name]))
+            results.extend(_one_sided_results(child, gold_dict[field_name], "omission"))
         elif extracted_has and not gold_has:
             # Schema has key, gold missing, extracted has key -> hallucination
-            results.extend(_hallucination_results(child, extracted_dict[field_name]))
+            results.extend(_one_sided_results(child, extracted_dict[field_name], "hallucination"))
         # else: schema has key, gold missing, extracted missing -> skip (nothing to score)
 
     # Extra extracted keys not in the schema -> hallucination.
@@ -212,7 +213,7 @@ def _score_array_ordered(
 
     # Extra gold elements: omissions
     for i in range(matched_count, len(gold_list)):
-        element_results = _omission_results(items_node, gold_list[i])
+        element_results = _one_sided_results(items_node, gold_list[i], "omission")
         _rewrite_element_paths(element_results, items_node.path, i)
         results.extend(element_results)
 
@@ -220,7 +221,7 @@ def _score_array_ordered(
     # (-1, -2, ...) so each has no gold counterpart yet stays distinct.
     halluc_index = -1
     for i in range(matched_count, len(extracted_list)):
-        element_results = _hallucination_results(items_node, extracted_list[i])
+        element_results = _one_sided_results(items_node, extracted_list[i], "hallucination")
         _rewrite_element_paths(element_results, items_node.path, halluc_index)
         results.extend(element_results)
         halluc_index -= 1
@@ -287,14 +288,14 @@ def _score_array_hungarian(
     if n == 0:
         halluc_index = -1
         for elem in extracted_list:
-            element_results = _hallucination_results(items_node, elem)
+            element_results = _one_sided_results(items_node, elem, "hallucination")
             _rewrite_element_paths(element_results, items_node.path, halluc_index)
             results.extend(element_results)
             halluc_index -= 1
         return results
     if m == 0:
         for idx, elem in enumerate(gold_list):
-            element_results = _omission_results(items_node, elem)
+            element_results = _one_sided_results(items_node, elem, "omission")
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
         return results
@@ -367,7 +368,7 @@ def _score_array_hungarian(
     # Unmatched gold -> omissions
     for i in range(n):
         if i not in matched_gold:
-            element_results = _omission_results(items_node, gold_list[i])
+            element_results = _one_sided_results(items_node, gold_list[i], "omission")
             _rewrite_element_paths(element_results, items_node.path, i)
             results.extend(element_results)
 
@@ -375,7 +376,7 @@ def _score_array_hungarian(
     halluc_index = -1
     for j in range(m):
         if j not in matched_ext:
-            element_results = _hallucination_results(items_node, extracted_list[j])
+            element_results = _one_sided_results(items_node, extracted_list[j], "hallucination")
             _rewrite_element_paths(element_results, items_node.path, halluc_index)
             results.extend(element_results)
             halluc_index -= 1
@@ -455,7 +456,7 @@ def _score_array_matched_by_key_field(
         # todo rethink if the gold missing the key, what to do ?
         if not isinstance(gold_elem, dict) or key not in gold_elem:
             # Gold element missing the key field — omission
-            element_results = _omission_results(items_node, gold_elem)
+            element_results = _one_sided_results(items_node, gold_elem, "omission")
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
             continue
@@ -468,7 +469,7 @@ def _score_array_matched_by_key_field(
                 key, node.path, k, type(k).__name__,
             )
             # todo rethink when key is not hashable, what todo ?
-            element_results = _omission_results(items_node, gold_elem)
+            element_results = _one_sided_results(items_node, gold_elem, "omission")
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
             continue
@@ -481,7 +482,7 @@ def _score_array_matched_by_key_field(
             )
 
             # todo rethink when key not unique, what to do ?
-            element_results = _omission_results(items_node, gold_elem)
+            element_results = _one_sided_results(items_node, gold_elem, "omission")
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
         elif k in extracted_by_key:
@@ -494,7 +495,7 @@ def _score_array_matched_by_key_field(
             results.extend(element_results)
         else:
             # No match in extracted — omission
-            element_results = _omission_results(items_node, gold_elem)
+            element_results = _one_sided_results(items_node, gold_elem, "omission")
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
 
@@ -506,7 +507,7 @@ def _score_array_matched_by_key_field(
     # Unmatched extracted elements (key not in gold).
     for k, elem in extracted_by_key.items():
         if k not in matched_keys:
-            element_results = _hallucination_results(items_node, elem)
+            element_results = _one_sided_results(items_node, elem, "hallucination")
             _rewrite_element_paths(element_results, items_node.path, halluc_index)
             results.extend(element_results)
             halluc_index -= 1
@@ -514,7 +515,7 @@ def _score_array_matched_by_key_field(
     # Extracted elements without the key field or with
     # unhashable/duplicate keys.
     for elem in extracted_unmatched:
-        element_results = _hallucination_results(items_node, elem)
+        element_results = _one_sided_results(items_node, elem, "hallucination")
         _rewrite_element_paths(element_results, items_node.path, halluc_index)
         results.extend(element_results)
         halluc_index -= 1
@@ -563,7 +564,7 @@ def _score_container_type_error(
 
     if gold_present:
         if isinstance(gold_value, expected):
-            return _omission_results(node, gold_value)
+            return _one_sided_results(node, gold_value, "omission")
         return [FieldResult(
             path=node.path,
             score=0.0,
@@ -574,7 +575,7 @@ def _score_container_type_error(
         )]
     if extracted_present:
         if isinstance(extracted_value, expected):
-            return _hallucination_results(node, extracted_value)
+            return _one_sided_results(node, extracted_value, "hallucination")
         return [FieldResult(
             path=node.path,
             score=0.0,
@@ -661,141 +662,80 @@ def _apply_transforms(value: object, transforms: list[TransformSpec]) -> object:
     return value
 
 
-def _omission_results(node: SchemaNode, gold_value: object = None) -> list[FieldResult]:
-    """Generate omission FieldResults for leaves under a missing node.
+def _one_sided_results(
+    node: SchemaNode,
+    value: object,
+    status: Literal["omission", "hallucination"],
+) -> list[FieldResult]:
+    """Generate FieldResults for a subtree that is present on only one side.
 
-    Can be called on any node, not just leaves. For object nodes, recurses
-    only into children that are actually PRESENT in the gold dict -- you
-    can't omit a field that gold didn't have.
-    For array nodes, emits one omission per gold element at its indexed
-    instance path (``tags[0]``, ``tags[1]``, ...), matching how a present
-    array's elements are indexed. If the gold array is empty (or a non-list
-    coerced to empty) while extracted is missing the field entirely, emits a
-    single omission for the array node itself.
+    ``value`` is the gold subtree for an omission or the extracted subtree for
+    a hallucination. Can be called on any node, not just leaves:
+
+    - Object node: recurses only into children PRESENT in ``value`` -- you
+      can't omit a field gold didn't have, or hallucinate one the extractor
+      didn't produce.
+    - Array node: one result per element at its instance path. Omissions are
+      indexed by gold position (``tags[0]``, ``tags[1]``, ...); hallucinations
+      by distinct negative indices (``tags[-1]``, ``tags[-2]``, ...). Both
+      match how a present array's elements are indexed. An empty array (or a
+      non-list coerced to empty) emits a single result for the array node
+      itself, preserving the original value for diagnostics.
+    - Leaf: a single result.
     """
     if node.skip:
         return []
+    side = "gold" if status == "omission" else "extracted"
+
     if node.json_type == "object" and node.children:
-        if gold_value is not None and not isinstance(gold_value, dict):
+        if value is not None and not isinstance(value, dict):
             logger.warning(
-                "Expected dict at '%s', got %s in gold",
-                node.path, type(gold_value).__name__,
+                "Expected dict at '%s', got %s in %s", node.path, type(value).__name__, side
             )
-        gold_dict = gold_value if isinstance(gold_value, dict) else {}
+        value_dict = value if isinstance(value, dict) else {}
         results: list[FieldResult] = []
         for child in node.children:
             field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
-            if field_name not in gold_dict:
-                continue  # can't omit what gold didn't have
-            results.extend(_omission_results(child, gold_dict[field_name]))
-        return results
-    if node.json_type == "array" and node.children:
-        if gold_value is not None and not isinstance(gold_value, list):
-            logger.warning(
-                "Expected list at '%s', got %s in gold", node.path, type(gold_value).__name__
-            )
-        gold_list = gold_value if isinstance(gold_value, list) else []
-        items_node = node.children[0]  # arrays have exactly one child: the items schema
-        if len(gold_list) == 0:
-            # gold is empty array (or non-list coerced), extracted is missing
-            # the field entirely: emit one omission for the array node itself.
-            # Preserve the original gold_value (even if wrong-typed) for diagnostics.
-            return [FieldResult(
-                path=node.path,
-                score=0.0,
-                comparator="",
-                gold_value=gold_value,
-                extracted_value=None,
-                status="omission",
-            )]
-        # Index each element by its gold position so a fully-missing array's
-        # omissions use the same instance paths (tags[0], tags[1], ...) as a
-        # present array's, instead of all sharing the schema path tags[].
-        item_results: list[FieldResult] = []
-        for idx, elem in enumerate(gold_list):
-            elem_results = _omission_results(items_node, elem)
-            _rewrite_element_paths(elem_results, items_node.path, idx)
-            item_results.extend(elem_results)
-        return item_results
-    return [FieldResult(
-        path=node.path,
-        score=0.0,
-        comparator=node.comparator.name,
-        gold_value=gold_value,
-        extracted_value=None,
-        status="omission",
-    )]
-
-
-def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[FieldResult]:
-    """Generate hallucination FieldResults for extra extracted elements.
-
-    Can be called on any node, not just leaves. For object nodes, recurses
-    only into children that are actually PRESENT in the extracted dict --
-    you can't hallucinate a field the extractor didn't produce.
-    For array nodes, emits one hallucination per extracted element at a
-    distinct negative instance path (``tags[-1]``, ``tags[-2]``, ...), matching
-    how a present array's extra elements are indexed. If the extracted array is
-    empty (or a non-list coerced to empty) while gold is missing the field
-    entirely, emits a single hallucination for the array node itself.
-    """
-    if node.skip:
-        return []
-    if node.json_type == "object" and node.children:
-        if extracted_value is not None and not isinstance(extracted_value, dict):
-            logger.warning(
-                "Expected dict at '%s', got %s in extracted",
-                node.path,
-                type(extracted_value).__name__,
-            )
-        results: list[FieldResult] = []
-        extracted_dict = extracted_value if isinstance(extracted_value, dict) else {}
-        for child in node.children:
-            field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
-            if field_name not in extracted_dict:
-                # Can't hallucinate what wasn't produced.
+            if field_name not in value_dict:
                 continue
-            results.extend(_hallucination_results(child, extracted_dict[field_name]))
+            results.extend(_one_sided_results(child, value_dict[field_name], status))
         return results
+
     if node.json_type == "array" and node.children:
-        if extracted_value is not None and not isinstance(extracted_value, list):
+        if value is not None and not isinstance(value, list):
             logger.warning(
-                "Expected list at '%s', got %s in extracted",
-                node.path,
-                type(extracted_value).__name__,
+                "Expected list at '%s', got %s in %s", node.path, type(value).__name__, side
             )
-        extracted_list = extracted_value if isinstance(extracted_value, list) else []
-        items_node = node.children[0]
-        if len(extracted_list) == 0:
-            # extracted is empty array (or non-list coerced), gold is missing
-            # the field entirely: emit one hallucination for the array node itself.
-            # Preserve the original extracted_value (even if wrong-typed) for diagnostics.
-            return [FieldResult(
-                path=node.path,
-                score=0.0,
-                comparator="",
-                gold_value=None,
-                extracted_value=extracted_value,
-                status="hallucination",
-            )]
-        # Distinct negative indices (no gold counterpart), mirroring how a
-        # present array's extra elements are indexed (tags[-1], tags[-2], ...).
+        value_list = value if isinstance(value, list) else []
+        items_node = node.children[0]  # arrays have exactly one child: the items schema
+        if len(value_list) == 0:
+            return [_one_sided_result(node, value, status, comparator="")]
         item_results: list[FieldResult] = []
-        halluc_index = -1
-        for elem in extracted_list:
-            elem_results = _hallucination_results(items_node, elem)
-            _rewrite_element_paths(elem_results, items_node.path, halluc_index)
+        for position, elem in enumerate(value_list):
+            index = position if status == "omission" else -(position + 1)
+            elem_results = _one_sided_results(items_node, elem, status)
+            _rewrite_element_paths(elem_results, items_node.path, index)
             item_results.extend(elem_results)
-            halluc_index -= 1
         return item_results
-    return [FieldResult(
+
+    return [_one_sided_result(node, value, status, comparator=node.comparator.name)]
+
+
+def _one_sided_result(
+    node: SchemaNode,
+    value: object,
+    status: Literal["omission", "hallucination"],
+    comparator: str,
+) -> FieldResult:
+    """One zero-score result with ``value`` on whichever side has it."""
+    return FieldResult(
         path=node.path,
         score=0.0,
-        comparator=node.comparator.name,
-        gold_value=None,
-        extracted_value=extracted_value,
-        status="hallucination",
-    )]
+        comparator=comparator,
+        gold_value=value if status == "omission" else None,
+        extracted_value=value if status == "hallucination" else None,
+        status=status,
+    )
 
 
 def _rewrite_element_paths(
