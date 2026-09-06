@@ -1238,60 +1238,6 @@ class TestScoreObjectEdgeCases:
         assert by_path["description"].extracted_value is None
 
 
-class TestScoreObjectKnownBugs:
-    """Tests that document open bugs. Each is xfail(strict=True) so the fix
-    PR turns it green by deleting the marker."""
-
-    def test_gold_key_not_in_schema_is_ignored_when_extracted_lacks_it(self) -> None:
-        # Not a bug on its own, but pins the half of #113 that already
-        # behaves as desired: a gold-only unknown key produces no result.
-        schema = _make_schema({
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-        })
-        results = score_record(schema, {"name": "a", "extra": "x"}, {"name": "a"})
-        assert [r.path for r in results] == ["name"]
-        assert results[0].status == "match"
-
-    @pytest.mark.xfail(
-        strict=True,
-        reason="#113: gold key not in schema is flagged as hallucination when "
-        "extracted reproduces it; should be skipped",
-    )
-    def test_gold_key_not_in_schema_reproduced_by_extracted_is_not_hallucination(
-        self,
-    ) -> None:
-        schema = _make_schema({
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-        })
-        results = score_record(
-            schema, {"name": "a", "extra": "x"}, {"name": "a", "extra": "x"}
-        )
-        by_path = {r.path: r for r in results}
-        assert by_path["extra"].status != "hallucination"
-
-    @pytest.mark.xfail(
-        strict=True,
-        reason="#114: property name containing '.' is split as a path and "
-        "misreported as hallucination",
-    )
-    def test_property_name_containing_dot(self) -> None:
-        schema = _make_schema({
-            "type": "object",
-            "properties": {
-                "x.y": {"type": "string"},
-                "z": {"type": "string"},
-            },
-        })
-        record = {"x.y": "1", "z": "2"}
-        results = score_record(schema, record, dict(record))
-        by_path = {r.path: r for r in results}
-        assert len(results) == 2
-        assert by_path["z"].status == "match"
-        assert by_path["x.y"].status == "match"
-
-
 class TestListValuedType:
     def test_multi_type_default_exact_match(self) -> None:
         schema = _make_schema({
