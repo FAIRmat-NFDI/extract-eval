@@ -1106,8 +1106,6 @@ class TestSkipFields:
         assert scored[0].path == "name"
 
 
-# --- _score_object edge cases (issue #115) ---
-
 
 class TestScoreObjectEdgeCases:
     def test_same_field_name_at_different_depths(self) -> None:
@@ -1239,15 +1237,9 @@ class TestScoreObjectEdgeCases:
 
 
 class TestScoreObjectDirect:
-    """Unit tests for _score_object itself, bypassing _score_node dispatch.
-
-    _score_object is the function that assigns every object field its status,
-    so its contract is pinned here independently of the layers above it.
-    """
 
     def test_requires_dicts_on_both_sides(self) -> None:
         # _score_container is responsible for routing non-dicts elsewhere.
-        # _score_object itself refuses them rather than guessing.
         node = _make_schema({
             "type": "object",
             "properties": {"name": {"type": "string"}},
@@ -1405,9 +1397,6 @@ class TestScoreObjectDirect:
         assert results[0].status == "match"
 
     def test_same_field_name_at_different_depths(self) -> None:
-        # "name" is a leaf child of "experiment" and also a leaf child of
-        # "experiment.sample". The lookup is against the dict at the current
-        # node, so they never collide.
         root = _make_schema({
             "type": "object",
             "properties": {
