@@ -139,7 +139,8 @@ Run-level metrics (`mean_precision`, `mean_recall`, `mean_f1`) are the arithmeti
 **Important:** All gold fields must be defined in the eval schema, so the evaluator knows
 how to score them. A gold instance can omit a field that is in the schema (it simply won't
 be scored for that record). `validate_gold()` raises an error if gold has fields not in
-the schema.
+the schema. Property names containing `.` are rejected because dots separate nested field
+paths in evaluation output.
 
 ---
 
