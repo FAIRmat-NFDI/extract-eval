@@ -118,10 +118,10 @@ def _score_object(
             results.extend(_score_node(child, gold_dict[field_name], extracted_dict[field_name]))
         elif gold_has and not extracted_has:
             # Schema has key, gold has key, extracted missing -> omission
-            results.extend(_one_sided_results(child, gold_dict[field_name], "omission"))
+            results.extend(_omission_results(child, gold_dict[field_name]))
         elif extracted_has and not gold_has:
             # Schema has key, gold missing, extracted has key -> hallucination
-            results.extend(_one_sided_results(child, extracted_dict[field_name], "hallucination"))
+            results.extend(_hallucination_results(child, extracted_dict[field_name]))
         # else: schema has key, gold missing, extracted missing -> skip (nothing to score)
 
     # Extra extracted keys not in the schema -> hallucination.
@@ -213,7 +213,7 @@ def _score_array_ordered(
 
     # Extra gold elements: omissions
     for i in range(matched_count, len(gold_list)):
-        element_results = _one_sided_results(items_node, gold_list[i], "omission")
+        element_results = _omission_results(items_node, gold_list[i])
         _rewrite_element_paths(element_results, items_node.path, i)
         results.extend(element_results)
 
@@ -221,7 +221,7 @@ def _score_array_ordered(
     # (-1, -2, ...) so each has no gold counterpart yet stays distinct.
     halluc_index = -1
     for i in range(matched_count, len(extracted_list)):
-        element_results = _one_sided_results(items_node, extracted_list[i], "hallucination")
+        element_results = _hallucination_results(items_node, extracted_list[i])
         _rewrite_element_paths(element_results, items_node.path, halluc_index)
         results.extend(element_results)
         halluc_index -= 1
@@ -288,14 +288,14 @@ def _score_array_hungarian(
     if n == 0:
         halluc_index = -1
         for elem in extracted_list:
-            element_results = _one_sided_results(items_node, elem, "hallucination")
+            element_results = _hallucination_results(items_node, elem)
             _rewrite_element_paths(element_results, items_node.path, halluc_index)
             results.extend(element_results)
             halluc_index -= 1
         return results
     if m == 0:
         for idx, elem in enumerate(gold_list):
-            element_results = _one_sided_results(items_node, elem, "omission")
+            element_results = _omission_results(items_node, elem)
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
         return results
@@ -368,7 +368,7 @@ def _score_array_hungarian(
     # Unmatched gold -> omissions
     for i in range(n):
         if i not in matched_gold:
-            element_results = _one_sided_results(items_node, gold_list[i], "omission")
+            element_results = _omission_results(items_node, gold_list[i])
             _rewrite_element_paths(element_results, items_node.path, i)
             results.extend(element_results)
 
@@ -376,7 +376,7 @@ def _score_array_hungarian(
     halluc_index = -1
     for j in range(m):
         if j not in matched_ext:
-            element_results = _one_sided_results(items_node, extracted_list[j], "hallucination")
+            element_results = _hallucination_results(items_node, extracted_list[j])
             _rewrite_element_paths(element_results, items_node.path, halluc_index)
             results.extend(element_results)
             halluc_index -= 1
@@ -456,7 +456,7 @@ def _score_array_matched_by_key_field(
         # todo rethink if the gold missing the key, what to do ?
         if not isinstance(gold_elem, dict) or key not in gold_elem:
             # Gold element missing the key field — omission
-            element_results = _one_sided_results(items_node, gold_elem, "omission")
+            element_results = _omission_results(items_node, gold_elem)
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
             continue
@@ -469,7 +469,7 @@ def _score_array_matched_by_key_field(
                 key, node.path, k, type(k).__name__,
             )
             # todo rethink when key is not hashable, what todo ?
-            element_results = _one_sided_results(items_node, gold_elem, "omission")
+            element_results = _omission_results(items_node, gold_elem)
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
             continue
@@ -482,7 +482,7 @@ def _score_array_matched_by_key_field(
             )
 
             # todo rethink when key not unique, what to do ?
-            element_results = _one_sided_results(items_node, gold_elem, "omission")
+            element_results = _omission_results(items_node, gold_elem)
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
         elif k in extracted_by_key:
@@ -495,7 +495,7 @@ def _score_array_matched_by_key_field(
             results.extend(element_results)
         else:
             # No match in extracted — omission
-            element_results = _one_sided_results(items_node, gold_elem, "omission")
+            element_results = _omission_results(items_node, gold_elem)
             _rewrite_element_paths(element_results, items_node.path, idx)
             results.extend(element_results)
 
@@ -507,7 +507,7 @@ def _score_array_matched_by_key_field(
     # Unmatched extracted elements (key not in gold).
     for k, elem in extracted_by_key.items():
         if k not in matched_keys:
-            element_results = _one_sided_results(items_node, elem, "hallucination")
+            element_results = _hallucination_results(items_node, elem)
             _rewrite_element_paths(element_results, items_node.path, halluc_index)
             results.extend(element_results)
             halluc_index -= 1
@@ -515,7 +515,7 @@ def _score_array_matched_by_key_field(
     # Extracted elements without the key field or with
     # unhashable/duplicate keys.
     for elem in extracted_unmatched:
-        element_results = _one_sided_results(items_node, elem, "hallucination")
+        element_results = _hallucination_results(items_node, elem)
         _rewrite_element_paths(element_results, items_node.path, halluc_index)
         results.extend(element_results)
         halluc_index -= 1
@@ -564,7 +564,7 @@ def _score_container_type_error(
 
     if gold_present:
         if isinstance(gold_value, expected):
-            return _one_sided_results(node, gold_value, "omission")
+            return _omission_results(node, gold_value)
         return [FieldResult(
             path=node.path,
             score=0.0,
@@ -575,7 +575,7 @@ def _score_container_type_error(
         )]
     if extracted_present:
         if isinstance(extracted_value, expected):
-            return _one_sided_results(node, extracted_value, "hallucination")
+            return _hallucination_results(node, extracted_value)
         return [FieldResult(
             path=node.path,
             score=0.0,
@@ -660,6 +660,16 @@ def _apply_transforms(value: object, transforms: list[TransformSpec]) -> object:
         fn = get_transform(spec.name)
         value = fn(value, spec.params)
     return value
+
+
+def _omission_results(node: SchemaNode, gold_value: object) -> list[FieldResult]:
+    """Omission results for a subtree that gold has and extracted lacks."""
+    return _one_sided_results(node, gold_value, "omission")
+
+
+def _hallucination_results(node: SchemaNode, extracted_value: object) -> list[FieldResult]:
+    """Hallucination results for a subtree that extracted has and gold lacks."""
+    return _one_sided_results(node, extracted_value, "hallucination")
 
 
 def _one_sided_results(
