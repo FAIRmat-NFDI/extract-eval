@@ -107,6 +107,7 @@ def _score_object(
                 gold_value=gold_val,
                 extracted_value=extracted_val,
                 status="skipped",
+                reason="skipped by x-eval-skip",
             ))
             continue
 
@@ -124,18 +125,36 @@ def _score_object(
             results.extend(_hallucination_results(child, extracted_dict[field_name]))
         # else: schema has key, gold missing, extracted missing -> skip (nothing to score)
 
-    # Extra extracted keys not in the schema -> hallucination.
+    # Gold fields without a schema comparator remain visible, but cannot be
+    # scored. Consume the matching extracted key when present so reproducing
+    # an intentionally unscored gold field is not classified as hallucination.
     # The schema loop above handles extracted keys that ARE in the schema
     # (matched against gold to decide match/mismatch/hallucination/skip).
-    # This block catches extracted keys that are NOT in the schema at all.
-    # Since validate_gold enforces that all gold fields are in the schema,
-    # "not in schema" implies "not in gold" for valid data.
     schema_fields = {
         child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
         for child in node.children
     }
-    for key in sorted(extracted_dict):
+    for key in sorted(gold_dict):
         if key not in schema_fields:
+            extracted_has = key in extracted_dict
+            path = f"{node.path}.{key}" if node.path else key
+            reason = "gold field not in schema, no comparator to apply"
+            if extracted_has:
+                reason += "; extracted also has this field"
+            results.append(FieldResult(
+                path=path,
+                score=0.0,
+                comparator="",
+                gold_value=gold_dict[key],
+                extracted_value=extracted_dict.get(key),
+                status="skipped",
+                reason=reason,
+            ))
+
+    # An extracted key is a hallucination only when neither schema nor gold
+    # contains it.
+    for key in sorted(extracted_dict):
+        if key not in schema_fields and key not in gold_dict:
             path = f"{node.path}.{key}" if node.path else key
             results.append(FieldResult(
                 path=path,
