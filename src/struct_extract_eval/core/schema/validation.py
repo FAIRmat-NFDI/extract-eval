@@ -218,11 +218,7 @@ def _validate_node(
 
         schema_fields: set[str] = set()
         for child in node.children:
-            field_name = (
-                child.path.rsplit(".", 1)[-1]
-                if "." in child.path
-                else child.path
-            )
+            field_name = child.name
             schema_fields.add(field_name)
             if field_name in gold_value:
                 _validate_node(
