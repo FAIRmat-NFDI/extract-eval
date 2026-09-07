@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from struct_extract_eval.core.comparators.comparator import ComparatorResult
@@ -1463,3 +1465,50 @@ class TestListValuedType:
             assert results[0].status == "match"
         finally:
             _clear_registry()
+
+
+# --- One-sided walk (omission / hallucination of a whole subtree) ---
+
+
+def _meta_schema() -> "SchemaNode":  # noqa: F821
+    # Fresh dict each call: _make_schema mutates its input.
+    return _make_schema({
+        "type": "object",
+        "properties": {
+            "meta": {
+                "type": "object",
+                "properties": {
+                    "a": {"type": "string"},
+                    "note": {"type": "string", "x-eval-skip": True},
+                },
+            },
+        },
+    })
+
+
+class TestOneSidedWalk:
+    """Branches of the one-sided walk that no other test reaches."""
+
+    def test_omitted_subtree_emits_nothing_for_skip_child(self) -> None:
+        results = score_record(_meta_schema(), {"meta": {"a": "1", "note": "x"}}, {})
+        assert [(r.path, r.status) for r in results] == [("meta.a", "omission")]
+
+    def test_hallucinated_subtree_emits_nothing_for_skip_child(self) -> None:
+        results = score_record(_meta_schema(), {}, {"meta": {"a": "1", "note": "x"}})
+        assert [(r.path, r.status) for r in results] == [("meta.a", "hallucination")]
+
+    def test_omitted_object_with_wrong_typed_gold_warns_and_emits_nothing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            results = score_record(_meta_schema(), {"meta": "oops"}, {})
+        assert results == []
+        assert "Expected dict at 'meta', got str in gold" in caplog.text
+
+    def test_hallucinated_object_with_wrong_typed_extracted_warns_and_emits_nothing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            results = score_record(_meta_schema(), {}, {"meta": "oops"})
+        assert results == []
+        assert "Expected dict at 'meta', got str in extracted" in caplog.text
