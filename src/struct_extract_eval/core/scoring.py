@@ -680,23 +680,15 @@ def _one_sided_results(
     """Generate FieldResults for a subtree that is present on only one side.
 
     ``value`` is the gold subtree for an omission or the extracted subtree for
-    a hallucination. Can be called on any node, not just leaves:
-
-    - Object node: recurses only into children PRESENT in ``value`` -- you
-      can't omit a field gold didn't have, or hallucinate one the extractor
-      didn't produce.
-    - Array node: one result per element at its instance path. Omissions are
-      indexed by gold position (``tags[0]``, ``tags[1]``, ...); hallucinations
-      by distinct negative indices (``tags[-1]``, ``tags[-2]``, ...). Both
-      match how a present array's elements are indexed. An empty array (or a
-      non-list coerced to empty) emits a single result for the array node
-      itself, preserving the original value for diagnostics.
-    - Leaf: a single result.
+    a hallucination.
+    the value is passed as arg for counting how many FieldResult with status should
+    be appended.
     """
     if node.skip:
         return []
     side = "gold" if status == "omission" else "extracted"
 
+    # Every child of the node gets the same one-sided status.
     if node.json_type == "object" and node.children:
         if value is not None and not isinstance(value, dict):
             logger.warning(
@@ -718,7 +710,7 @@ def _one_sided_results(
             )
         value_list = value if isinstance(value, list) else []
         items_node = node.children[0]  # arrays have exactly one child: the items schema
-        if len(value_list) == 0:
+        if len(value_list) == 0: # empty one side
             return [_one_sided_result(node, value, status, comparator="")]
         item_results: list[FieldResult] = []
         for position, elem in enumerate(value_list):
@@ -728,6 +720,7 @@ def _one_sided_results(
             item_results.extend(elem_results)
         return item_results
 
+    # leaf
     return [_one_sided_result(node, value, status, comparator=node.comparator.name)]
 
 
