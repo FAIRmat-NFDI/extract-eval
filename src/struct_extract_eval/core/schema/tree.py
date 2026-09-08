@@ -58,8 +58,7 @@ class SchemaNode:
     path: str  # field path
     json_type: str
     # Key of this node in its parent: property name for object children,
-    # "[]" for array items, "" for the root. Look fields up by this, not by
-    # splitting `path`: a property name can itself contain ".".
+    # "[]" for array items, "" for the root.
     name: str = ""
     comparator: ComparatorSpec = field(default_factory=ComparatorSpec)
     children: list["SchemaNode"] = field(default_factory=list)
