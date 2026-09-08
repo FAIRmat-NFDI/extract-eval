@@ -92,8 +92,7 @@ def _score_object(
         )]
 
     for child in node.children:
-        # Extract field name from path: "experiment.name" -> "name"
-        field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
+        field_name = child.name
 
         # Skip fields are included in results for visibility but excluded
         # from all metric calculations (precision, recall, F1, total_fields).
@@ -130,10 +129,7 @@ def _score_object(
     # an intentionally unscored gold field is not classified as hallucination.
     # The schema loop above handles extracted keys that ARE in the schema
     # (matched against gold to decide match/mismatch/hallucination/skip).
-    schema_fields = {
-        child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
-        for child in node.children
-    }
+    schema_fields = {child.name for child in node.children}
     for key in sorted(gold_dict):
         if key not in schema_fields:
             extracted_has = key in extracted_dict
@@ -716,10 +712,9 @@ def _one_sided_results(
         value_dict = value if isinstance(value, dict) else {}
         results: list[FieldResult] = []
         for child in node.children:
-            field_name = child.path.rsplit(".", 1)[-1] if "." in child.path else child.path
-            if field_name not in value_dict:
+            if child.name not in value_dict:
                 continue
-            results.extend(_one_sided_results(child, value_dict[field_name], status))
+            results.extend(_one_sided_results(child, value_dict[child.name], status))
         return results
 
     if node.json_type == "array" and node.children:
