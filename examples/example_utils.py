@@ -72,3 +72,35 @@ def _clip(text: str) -> str:
     if len(text) <= _MAX_VALUE_WIDTH:
         return text
     return text[: _MAX_VALUE_WIDTH - 3] + "..."
+
+
+def show_per_field(run: RunResult, title: str | None = None) -> None:
+    """Print the per-field aggregate: mean score and status counts per path."""
+    headers = ("path", "score", "match", "mismatch", "omission", "hallucination")
+    rows = [
+        (
+            path,
+            f"{agg.mean_score:.2f}",
+            str(agg.matches),
+            str(agg.mismatches),
+            str(agg.omissions),
+            str(agg.hallucinations),
+        )
+        for path, agg in sorted(run.per_field.items())
+    ]
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+
+    def line(cells: tuple[str, ...]) -> str:
+        # first column left-aligned, numeric columns right-aligned
+        first = cells[0].ljust(widths[0])
+        rest = [cells[i].rjust(widths[i]) for i in range(1, len(cells))]
+        return "  " + "  ".join([first, *rest])
+
+    if title:
+        print(title)
+    print(line(headers))
+    for row in rows:
+        print(line(row))
