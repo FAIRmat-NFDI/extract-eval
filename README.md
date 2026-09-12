@@ -140,7 +140,9 @@ Run-level metrics (`mean_precision`, `mean_recall`, `mean_f1`) are the arithmeti
 how to score them. A gold instance can omit a field that is in the schema (it simply won't
 be scored for that record). `validate_gold()` raises an error if gold has fields not in
 the schema. Property names containing `.` are rejected because dots separate nested field
-paths in evaluation output.
+paths in evaluation output. Gold property names are checked during the existing
+schema traversal, before reporting an unknown field; comparator-owned values
+remain opaque to structural validation.
 
 ---
 
