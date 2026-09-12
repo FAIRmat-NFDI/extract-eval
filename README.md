@@ -218,8 +218,7 @@ Write a function that takes `(gold, extracted, params)` and returns a `Comparato
 then register it:
 
 ```python
-from struct_extract_eval.core.comparators.registry import register
-from struct_extract_eval.core.comparators.comparator import ComparatorResult
+from struct_extract_eval import ComparatorResult, register
 
 def compare_date(gold, extracted, params):
     """Compare dates regardless of format."""
