@@ -156,6 +156,36 @@ class TestBuildRunResult:
         assert run.total_omissions == 1
         assert run.total_hallucinations == 1
 
+    def test_per_field_precision_recall_f1(self) -> None:
+        # "name" across 3 records: match (1.0), omission, hallucination.
+        # precision = 1 / (1 match + 1 hallucination) = 0.5
+        # recall    = 1 / (1 match + 1 omission)      = 0.5
+        r1 = self._make_record(0, [
+            FieldResult("name", 1.0, "exact", "A", "A", "match"),
+        ])
+        r2 = self._make_record(1, [
+            FieldResult("name", 0.0, "exact", "B", None, "omission"),
+        ])
+        r3 = self._make_record(2, [
+            FieldResult("name", 0.0, "exact", None, "ghost", "hallucination"),
+        ])
+        run = build_run_result([r1, r2, r3])
+        agg = run.per_field["name"]
+        assert agg.precision == 0.5
+        assert agg.recall == 0.5
+        assert agg.f1 == 0.5
+
+    def test_per_field_f1_only_omissions(self) -> None:
+        # No extracted values at all: precision is vacuously 1.0, recall 0.0, f1 0.0
+        r1 = self._make_record(0, [
+            FieldResult("name", 0.0, "exact", "A", None, "omission"),
+        ])
+        run = build_run_result([r1])
+        agg = run.per_field["name"]
+        assert agg.precision == 1.0
+        assert agg.recall == 0.0
+        assert agg.f1 == 0.0
+
     def test_empty_run(self) -> None:
         run = build_run_result([])
         assert run.mean_f1 == 1.0

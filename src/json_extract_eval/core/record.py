@@ -32,6 +32,9 @@ class FieldAggregation:
     mismatches: int
     omissions: int
     hallucinations: int
+    precision: float
+    recall: float
+    f1: float
 
 
 @dataclass(frozen=True)
@@ -50,13 +53,11 @@ class RunResult:
     per_field: dict[str, FieldAggregation]
 
 
-def build_record_result(
-    record_id: str | int,
-    field_results: list[FieldResult],
-    gold: dict[str, object],
-    extracted: dict[str, object],
-) -> RecordResult:
+def precision_recall_f1(field_results: list[FieldResult]) -> tuple[float, float, float]:
     """Compute precision, recall, F1 from field results.
+
+    Used both for one record (all its fields) and for one field path (its
+    results across all records), so the two levels never disagree.
 
     Counting logic (skipped, pending, and batch_error fields are present in
     results for visibility but excluded from all metric calculations):
@@ -94,7 +95,17 @@ def build_record_result(
         f1 = 2 * precision * recall / (precision + recall)
     else:
         f1 = 0.0
+    return precision, recall, f1
 
+
+def build_record_result(
+    record_id: str | int,
+    field_results: list[FieldResult],
+    gold: dict[str, object],
+    extracted: dict[str, object],
+) -> RecordResult:
+    """Score one gold/extracted pair. See precision_recall_f1 for the rules."""
+    precision, recall, f1 = precision_recall_f1(field_results)
     return RecordResult(
         record_id=record_id,
         field_results=field_results,
@@ -127,7 +138,7 @@ def build_run_result(records: list[RecordResult]) -> RunResult:
         )
 
     # Per-field accumulation
-    field_scores: dict[str, list[float]] = {}
+    field_results_by_path: dict[str, list[FieldResult]] = {}
     field_statuses: dict[str, dict[str, int]] = {}
 
     total_fields = 0
@@ -148,8 +159,8 @@ def build_run_result(records: list[RecordResult]) -> RunResult:
             elif fr.status == "hallucination":
                 total_hallucinations += 1
 
-            if fr.path not in field_scores:
-                field_scores[fr.path] = []
+            if fr.path not in field_results_by_path:
+                field_results_by_path[fr.path] = []
                 field_statuses[fr.path] = {
                     "match": 0,
                     "mismatch": 0,
@@ -157,19 +168,23 @@ def build_run_result(records: list[RecordResult]) -> RunResult:
                     "hallucination": 0,
                 }
 
-            field_scores[fr.path].append(fr.score)
+            field_results_by_path[fr.path].append(fr)
             field_statuses[fr.path][fr.status] += 1
 
     # Build per-field aggregation
     per_field: dict[str, FieldAggregation] = {}
-    for path, scores in field_scores.items():
+    for path, results in field_results_by_path.items():
         counts = field_statuses[path]
+        precision, recall, f1 = precision_recall_f1(results)
         per_field[path] = FieldAggregation(
-            mean_score=mean(scores),
+            mean_score=mean(fr.score for fr in results),
             matches=counts["match"],
             mismatches=counts["mismatch"],
             omissions=counts["omission"],
             hallucinations=counts["hallucination"],
+            precision=precision,
+            recall=recall,
+            f1=f1,
         )
 
     return RunResult(
