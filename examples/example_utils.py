@@ -75,12 +75,15 @@ def _clip(text: str) -> str:
 
 
 def show_per_field(run: RunResult, title: str | None = None) -> None:
-    """Print the per-field aggregate: mean score and status counts per path."""
-    headers = ("path", "score", "match", "mismatch", "omission", "hallucination")
+    """Print the per-field aggregate: score, P/R/F1 and status counts per path."""
+    headers = ("path", "score", "P", "R", "F1", "match", "mismatch", "omission", "hallucination")
     rows = [
         (
             path,
             f"{agg.mean_score:.2f}",
+            f"{agg.precision:.2f}",
+            f"{agg.recall:.2f}",
+            f"{agg.f1:.2f}",
             str(agg.matches),
             str(agg.mismatches),
             str(agg.omissions),
